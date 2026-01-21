@@ -1,29 +1,16 @@
-# 🎭 Impostor Word Game
+# Impostor Word Game
 
-A lightweight, mobile-first, online multiplayer impostor word game.
+## How to Deploy
 
----
+1. Upload the `backend` and `frontend` folders to a GitHub repository.
+2. On Render:
+   - Create a **Web Service**.
+   - Connect GitHub repository.
+   - Set **Start Command:** `node backend/server.js`.
+3. Access your game via the Render URL.
 
-## 🎮 Features
-- 3–15 players
-- One impostor per game
-- 2 clue rounds + voting
-- Mobile-first web UI
-- No accounts required
+## Gameplay
 
----
-
-## 🧱 Tech Stack
-- Frontend: React
-- Backend: Node.js, Express, Socket.IO
-- Hosting: Render
-- Repo: GitHub (monorepo)
-
----
-
-## 🖥 Local Development
-
-### 1. Install dependencies
-```bash
-npm install
-cd client && npm install
+- Mobile-first multiplayer impostor word game
+- 3-15 players per lobby
+- 2 rounds of word submission + voting
