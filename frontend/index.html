@@ -16,23 +16,23 @@ body {
 }
 
 .container {
-    width: 90%;
-    max-width: 500px;
+    width: 95%;
+    max-width: 480px;
     background: #ffffffee;
     border-radius: 12px;
     padding: 20px;
-    margin-top: 20px;
+    margin: 20px 0;
     box-shadow: 0 6px 12px rgba(0,0,0,0.15);
     text-align: center;
 }
 
-h2 { color: #333; }
-h3 { margin: 15px 0 5px; color: #555; }
+h2 { color: #333; margin-bottom: 12px; }
+h3 { margin: 10px 0 6px; color: #555; }
 
 input {
     padding: 8px;
     margin: 5px 0;
-    width: 80%;
+    width: 90%;
     border-radius: 6px;
     border: 1px solid #ccc;
 }
@@ -58,10 +58,11 @@ button:hover { opacity: 0.85; }
 #roundSubmissions div { margin: 8px 0; padding: 6px; background: #f0f0f0; border-radius: 6px; }
 
 #currentTurn { font-weight: bold; margin: 10px 0; color: #444; }
+#countdown { font-size: 18px; color: #d32f2f; margin: 10px 0; }
 
 @media(max-width: 400px) {
-    input { width: 90%; }
-    button { width: 80%; }
+    input { width: 95%; }
+    button { width: 90%; }
 }
 </style>
 </head>
@@ -82,6 +83,7 @@ button:hover { opacity: 0.85; }
     <div id="roleInfo"></div>
     <div id="wordPrompt"></div>
     <div id="currentTurn"></div>
+    <div id="countdown"></div>
     <input id="wordInput" placeholder="Enter your word">
     <button id="submitWordBtn">Submit Word</button>
 
