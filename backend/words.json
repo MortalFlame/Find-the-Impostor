@@ -1,7 +1,22 @@
 [
-  { "word": "apple", "hint": "fruit" },
-  { "word": "dog", "hint": "pet" },
-  { "word": "car", "hint": "vehicle" },
-  { "word": "sun", "hint": "star" },
-  { "word": "piano", "hint": "instrument" }
+  {"word":"Sun","hint":"Shines bright"},
+  {"word":"Moon","hint":"Night sky"},
+  {"word":"Star","hint":"Twinkles"},
+  {"word":"Cloud","hint":"Fluffy white"},
+  {"word":"Tree","hint":"Grows tall"},
+  {"word":"River","hint":"Flows water"},
+  {"word":"Book","hint":"Read it"},
+  {"word":"Cat","hint":"Purrs softly"},
+  {"word":"Dog","hint":"Barks loudly"},
+  {"word":"Rain","hint":"Falls from sky"},
+  {"word":"Snow","hint":"Cold white"},
+  {"word":"Car","hint":"Drives fast"},
+  {"word":"House","hint":"People live"},
+  {"word":"Chair","hint":"Sit on it"},
+  {"word":"Table","hint":"Place items"},
+  {"word":"Phone","hint":"Make calls"},
+  {"word":"Pen","hint":"Write words"},
+  {"word":"Fish","hint":"Swims water"},
+  {"word":"Bird","hint":"Flies high"},
+  {"word":"Flower","hint":"Smells nice"}
 ]
