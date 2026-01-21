@@ -185,6 +185,6 @@ wss.on('connection', (ws) => {
         if(!currentLobby) return;
         const lobby = lobbies[currentLobby];
         lobby.players = lobby.players.filter(p=>p.ws!==ws);
-        broadcast(currentLobby,{ type:'lobbyUpdate', players:lobby.players.map(p=>p.name) });
+        broadcast(currentLobby,{ type:'lobbyUpdate', players: lobby.players.map(p=>p.name) });
     });
 });
