@@ -137,3 +137,10 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# React build output
+client/build/
+
+# Mac OS junk
+.DS_Store
+
