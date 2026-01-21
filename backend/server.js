@@ -7,6 +7,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Use Render-assigned port or fallback to 3000 locally
 const PORT = process.env.PORT || 3000;
 const FRONTEND_DIR = process.env.FRONTEND_DIR || '../frontend';
 app.use(express.static(FRONTEND_DIR));
@@ -15,13 +16,14 @@ const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
 
+// WebSocket server
 const wss = new WebSocketServer({ server });
 
 // Load words
 const WORDS_FILE = process.env.WORDS_FILE || __dirname + '/words.json';
 const words = JSON.parse(fs.readFileSync(WORDS_FILE, 'utf-8'));
 
-let lobbies = {}; // lobbyId -> { players: [], phase, secretWord, hint, turnIndex, round1Submissions, round2Submissions }
+let lobbies = {}; // lobbyId -> lobby state
 
 function getRandomWord() {
     const index = Math.floor(Math.random() * words.length);
@@ -46,7 +48,7 @@ wss.on('connection', (ws) => {
                 playerName = msg.name;
                 let lobbyId = msg.lobbyId;
 
-                // Assign random 4-digit lobby code if none provided
+                // Assign random lobby code if none provided
                 if (!lobbyId) {
                     lobbyId = Math.floor(1000 + Math.random() * 9000).toString();
                     ws.send(JSON.stringify({ type: 'lobbyAssigned', lobbyId }));
@@ -88,7 +90,7 @@ wss.on('connection', (ws) => {
                 lobby.round1Submissions = [];
                 lobby.round2Submissions = [];
 
-                // Notify all players of roles/word/hint
+                // Notify players
                 lobby.players.forEach(p => {
                     p.ws.send(JSON.stringify({
                         type: 'gameStart',
@@ -97,7 +99,6 @@ wss.on('connection', (ws) => {
                     }));
                 });
 
-                // Notify whose turn it is
                 broadcast(currentLobby, {
                     type: 'turnUpdate',
                     submissions: [],
@@ -110,22 +111,14 @@ wss.on('connection', (ws) => {
                 if (!currentLobby) return;
                 const lobbySub = lobbies[currentLobby];
                 const player = lobbySub.players[lobbySub.turnIndex];
-
-                // Ensure only current player can submit
-                if (ws !== player.ws) return;
+                if (ws !== player.ws) return; // Only current player
 
                 const word = msg.word;
-                if (lobbySub.phase === 'round1') {
-                    lobbySub.round1Submissions.push({ name: player.name, word });
-                } else if (lobbySub.phase === 'round2') {
-                    lobbySub.round2Submissions.push({ name: player.name, word });
-                }
+                if (lobbySub.phase === 'round1') lobbySub.round1Submissions.push({ name: player.name, word });
+                if (lobbySub.phase === 'round2') lobbySub.round2Submissions.push({ name: player.name, word });
 
-                // Advance turn
                 lobbySub.turnIndex++;
-                let roundComplete = false;
                 if (lobbySub.turnIndex >= lobbySub.players.length) {
-                    roundComplete = true;
                     if (lobbySub.phase === 'round1') {
                         lobbySub.phase = 'round2';
                         lobbySub.turnIndex = 0;
@@ -149,7 +142,6 @@ wss.on('connection', (ws) => {
                 }
 
                 if (lobbySub.phase === 'round1' || lobbySub.phase === 'round2') {
-                    // Broadcast turn update
                     broadcast(currentLobby, {
                         type: 'turnUpdate',
                         submissions: (lobbySub.phase === 'round1' ? lobbySub.round1Submissions : lobbySub.round2Submissions),
