@@ -1,32 +1,207 @@
-body {
-  margin: 0;
-  font-family: 'Segoe UI', sans-serif;
-  background: #0f172a;
-  color: #e5e7eb;
-  text-align: center;
+* {
+  box-sizing: border-box;
 }
 
-.hidden { display: none; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: radial-gradient(circle at top, #1e293b, #020617);
+  color: #e5e7eb;
+  min-height: 100vh;
+}
 
-input, button {
-  padding: 12px;
-  margin: 6px;
-  border-radius: 8px;
+#app {
+  max-width: 420px;
+  margin: auto;
+  padding: 16px;
+}
+
+.hidden {
+  display: none;
+}
+
+/* ---------- CARDS ---------- */
+
+.card {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 20px 40px rgba(0,0,0,.6);
+}
+
+.fade-in {
+  animation: fadeIn .6s ease forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- TEXT ---------- */
+
+.title {
+  text-align: center;
+  font-size: 42px;
+  margin-bottom: 20px;
+  letter-spacing: 1px;
+}
+
+h3 {
+  margin-top: 0;
+}
+
+/* ---------- INPUT ---------- */
+
+input {
+  width: 100%;
+  padding: 14px;
+  margin: 8px 0;
+  border-radius: 12px;
   border: none;
   font-size: 16px;
 }
 
+/* ---------- BUTTONS ---------- */
+
 button {
-  background: linear-gradient(135deg,#6366f1,#8b5cf6);
-  color: white;
+  width: 100%;
+  padding: 14px;
+  margin-top: 10px;
+  border-radius: 14px;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  transition: transform .1s ease, box-shadow .1s ease;
 }
 
-#role.civilian {
-  background: url('civilian.jpg') center/cover;
+button:active {
+  transform: scale(.97);
+}
+
+.primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  box-shadow: 0 10px 30px rgba(99,102,241,.4);
+}
+
+.secondary {
+  background: #1e293b;
+  color: #e5e7eb;
+}
+
+/* ---------- PLAYER LIST ---------- */
+
+.player-list div {
+  padding: 8px;
+  background: rgba(255,255,255,.05);
+  border-radius: 10px;
+  margin: 6px 0;
+}
+
+/* ---------- ROLE CARD ---------- */
+
+.role-card {
+  position: relative;
+  height: 160px;
+  border-radius: 20px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  animation: roleReveal .7s ease forwards;
+}
+
+@keyframes roleReveal {
+  from { transform: scale(.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.role-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  filter: brightness(.5);
+}
+
+.role-content {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+#roleLabel {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+#roleLabel.civilian {
   color: #22c55e;
 }
 
-#role.impostor {
-  background: url('impostor.jpg') center/cover;
+#roleLabel.impostor {
   color: #ef4444;
+}
+
+#secret {
+  margin-top: 6px;
+  font-size: 18px;
+  opacity: .9;
+}
+
+/* ---------- TURN ---------- */
+
+.turn-indicator {
+  text-align: center;
+  margin-bottom: 10px;
+  font-size: 16px;
+  opacity: .8;
+}
+
+/* ---------- INPUT AREA ---------- */
+
+.input-area {
+  display: flex;
+  gap: 8px;
+}
+
+.input-area input {
+  flex: 1;
+}
+
+/* ---------- ROUNDS ---------- */
+
+.rounds {
+  margin-top: 20px;
+}
+
+.round-card {
+  background: rgba(255,255,255,.05);
+  border-radius: 16px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.round-entries div {
+  padding: 6px 8px;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+
+/* ---------- VOTING ---------- */
+
+.voting button {
+  margin-bottom: 8px;
+}
+
+/* ---------- RESULTS ---------- */
+
+.results {
+  margin-top: 20px;
+  padding: 14px;
+  background: rgba(0,0,0,.4);
+  border-radius: 16px;
 }
