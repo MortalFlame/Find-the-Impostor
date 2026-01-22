@@ -1,4 +1,5 @@
 const ws = new WebSocket(location.origin.replace(/^http/, 'ws'));
+
 const $ = id => document.getElementById(id);
 
 const playerId = crypto.randomUUID();
@@ -17,6 +18,7 @@ $('joinBtn').onclick = () => {
 $('startBtn').onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
 
 $('submitBtn').onclick = () => {
+  if (!$('wordInput').value) return;
   ws.send(JSON.stringify({ type: 'submitWord', word: $('wordInput').value }));
   $('wordInput').value = '';
 };
@@ -36,13 +38,19 @@ ws.onmessage = e => {
     $('lobbyScreen').classList.add('hidden');
     $('gameScreen').classList.remove('hidden');
 
-    $('role').innerText = d.role.toUpperCase();
-    $('role').className = d.role;
+    $('roleLabel').innerText = d.role.toUpperCase();
+    $('roleLabel').className = d.role;
+
+    $('roleBg').style.backgroundImage =
+      d.role === 'civilian'
+        ? "url('https://images.unsplash.com/photo-1500530855697-b586d89ba3ee')"
+        : "url('https://images.unsplash.com/photo-1502082553048-f009c37129b9')";
+
     $('secret').innerText = d.word;
   }
 
   if (d.type === 'turnUpdate') {
-    $('turn').innerText = `Turn: ${d.currentPlayer}`;
+    $('turnIndicator').innerText = `Turn: ${d.currentPlayer}`;
     $('round1').innerHTML = d.round1.map(r => `<div>${r.name}: ${r.word}</div>`).join('');
     $('round2').innerHTML = d.round2.map(r => `<div>${r.name}: ${r.word}</div>`).join('');
   }
@@ -50,18 +58,20 @@ ws.onmessage = e => {
   if (d.type === 'startVoting') {
     $('voting').innerHTML = d.players
       .filter(p => p !== myName)
-      .map(p => `<button onclick="vote('${p}')">${p}</button>`)
+      .map(p => `<button onclick="vote('${p}')" class="primary">${p}</button>`)
       .join('');
   }
 
   if (d.type === 'gameEnd') {
     $('results').innerHTML = `
-      <h2>Game Over</h2>
-      <div>Word: ${d.secretWord}</div>
-      <div>Hint: ${d.hint}</div>
-      <div>${Object.entries(d.votes).map(v => `${v[0]} → ${v[1]}`).join('<br>')}</div>
+      <h3>Game Over</h3>
+      <div><b>Word:</b> ${d.secretWord}</div>
+      <div><b>Hint:</b> ${d.hint}</div>
+      <hr>
+      ${Object.entries(d.votes).map(v => `${v[0]} voted ${v[1]}`).join('<br>')}
     `;
     $('voting').innerHTML = '';
+    $('restartBtn').classList.remove('hidden');
   }
 };
 
