@@ -6,47 +6,38 @@ const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
-
-const PORT = process.env.PORT;
 app.use(express.static('frontend'));
 
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
+const PORT = process.env.PORT || 10000;
+const server = app.listen(PORT, () => console.log('Server running'));
 const wss = new WebSocketServer({ server });
 
-let words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf-8'))
-  .map(w => ({
-    word: w.word[0].toUpperCase() + w.word.slice(1),
-    hint: w.hint[0].toUpperCase() + w.hint.slice(1)
-  }));
+const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
 
 let lobbies = {};
-let usedWordIndexes = [];
+let usedIndexes = [];
 
 function getRandomWord() {
-  if (usedWordIndexes.length >= words.length) usedWordIndexes = [];
-  const available = words.map((_, i) => i).filter(i => !usedWordIndexes.includes(i));
-  const index = available[crypto.randomInt(available.length)];
-  usedWordIndexes.push(index);
-  return words[index];
+  if (usedIndexes.length === words.length) usedIndexes = [];
+  let i;
+  do { i = crypto.randomInt(words.length); } while (usedIndexes.includes(i));
+  usedIndexes.push(i);
+  return words[i];
 }
 
 function broadcast(lobby, data) {
   lobby.players.forEach(p => {
-    if (p.ws?.readyState === p.ws.OPEN) {
+    if (p.ws?.readyState === 1) {
       p.ws.send(JSON.stringify(data));
     }
   });
 }
 
 function startGame(lobby) {
-  if (lobby.players.filter(p => !p.disconnected).length < 3) return;
+  if (lobby.players.length < 3) return;
 
   lobby.phase = 'round1';
-  lobby.turnIndex = 0;
+  lobby.turn = 0;
   lobby.round1 = [];
   lobby.round2 = [];
   lobby.restartReady = [];
@@ -54,19 +45,17 @@ function startGame(lobby) {
   const impostorIndex = crypto.randomInt(lobby.players.length);
   const { word, hint } = getRandomWord();
 
-  lobby.secretWord = word;
+  lobby.word = word;
   lobby.hint = hint;
 
   lobby.players.forEach((p, i) => {
     p.role = i === impostorIndex ? 'impostor' : 'civilian';
     p.vote = '';
-    if (p.ws?.readyState === p.ws.OPEN) {
-      p.ws.send(JSON.stringify({
-        type: 'gameStart',
-        role: p.role,
-        word: p.role === 'civilian' ? word : hint
-      }));
-    }
+    p.ws.send(JSON.stringify({
+      type: 'gameStart',
+      role: p.role,
+      word: p.role === 'civilian' ? word : hint
+    }));
   });
 
   broadcast(lobby, {
@@ -74,85 +63,61 @@ function startGame(lobby) {
     phase: lobby.phase,
     round1: [],
     round2: [],
-    currentPlayer: lobby.players[lobby.turnIndex].name
+    currentPlayer: lobby.players[0].name
   });
 }
 
-function advanceTurn(lobby) {
-  let safety = 0;
-  do {
-    lobby.turnIndex = (lobby.turnIndex + 1) % lobby.players.length;
-    safety++;
-    if (safety > lobby.players.length) return false;
-  } while (lobby.players[lobby.turnIndex].disconnected);
-  return true;
-}
-
 wss.on('connection', ws => {
-  let lobbyId, playerId, player;
+  let lobbyId, player;
 
-  ws.on('message', msg => {
-    const data = JSON.parse(msg);
+  ws.on('message', raw => {
+    const msg = JSON.parse(raw);
 
-    if (data.type === 'joinLobby') {
-      playerId = data.playerId;
-      lobbyId = data.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
-
-      if (!lobbies[lobbyId]) {
-        lobbies[lobbyId] = {
-          id: lobbyId,
-          phase: 'lobby',
-          players: [],
-          round1: [],
-          round2: [],
-          restartReady: []
-        };
-      }
-
+    if (msg.type === 'joinLobby') {
+      lobbyId = msg.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
+      if (!lobbies[lobbyId]) lobbies[lobbyId] = { players: [], phase: 'lobby' };
       const lobby = lobbies[lobbyId];
-      player = lobby.players.find(p => p.id === playerId);
 
-      if (player) {
-        player.ws = ws;
-        player.disconnected = false;
-
-        ws.send(JSON.stringify({
-          type: 'turnUpdate',
-          phase: lobby.phase,
-          round1: lobby.round1,
-          round2: lobby.round2,
-          currentPlayer: lobby.players[lobby.turnIndex]?.name || null
-        }));
-      } else {
-        player = { id: playerId, name: data.name, ws, disconnected: false };
+      player = lobby.players.find(p => p.id === msg.playerId);
+      if (!player) {
+        player = { id: msg.playerId, name: msg.name, ws };
         lobby.players.push(player);
+      } else {
+        player.ws = ws;
       }
 
       ws.send(JSON.stringify({ type: 'lobbyAssigned', lobbyId }));
       broadcast(lobby, { type: 'lobbyUpdate', players: lobby.players.map(p => p.name) });
+      return;
     }
 
-    if (!player || !lobbies[lobbyId]) return;
+    if (!player) return;
     const lobby = lobbies[lobbyId];
 
-    if (data.type === 'startGame') {
-      if (lobby.phase === 'lobby') startGame(lobby);
+    if (msg.type === 'startGame' && lobby.phase === 'lobby') {
+      startGame(lobby);
     }
 
-    if (data.type === 'submitWord') {
-      if (lobby.players[lobby.turnIndex]?.id !== playerId) return;
+    if (msg.type === 'submitWord') {
+      if (lobby.players[lobby.turn].id !== player.id) return;
 
-      const entry = { name: player.name, word: data.word };
+      const entry = { name: player.name, word: msg.word };
       lobby.phase === 'round1' ? lobby.round1.push(entry) : lobby.round2.push(entry);
 
-      if (!advanceTurn(lobby)) return;
+      lobby.turn++;
 
-      if (lobby.turnIndex === 0) {
-        lobby.phase = lobby.phase === 'round1' ? 'round2' : 'voting';
-        if (lobby.phase === 'voting') {
-          broadcast(lobby, { type: 'startVoting', players: lobby.players.map(p => p.name) });
-          return;
-        }
+      if (lobby.turn >= lobby.players.length) {
+        lobby.turn = 0;
+        if (lobby.phase === 'round1') lobby.phase = 'round2';
+        else lobby.phase = 'voting';
+      }
+
+      if (lobby.phase === 'voting') {
+        broadcast(lobby, {
+          type: 'startVoting',
+          players: lobby.players.map(p => p.name)
+        });
+        return;
       }
 
       broadcast(lobby, {
@@ -160,46 +125,31 @@ wss.on('connection', ws => {
         phase: lobby.phase,
         round1: lobby.round1,
         round2: lobby.round2,
-        currentPlayer: lobby.players[lobby.turnIndex].name
+        currentPlayer: lobby.players[lobby.turn].name
       });
     }
 
-    if (data.type === 'vote') {
-      player.vote = data.vote;
-      if (lobby.players.every(p => p.vote)) {
-        const votes = {};
-        lobby.players.forEach(p => votes[p.name] = p.vote);
-        const impostor = lobby.players.find(p => p.role === 'impostor').name;
+    if (msg.type === 'vote') {
+      if (msg.vote === player.name) return;
+      player.vote = msg.vote;
 
+      if (lobby.players.every(p => p.vote)) {
         broadcast(lobby, {
           type: 'gameEnd',
           roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-          votes,
-          secretWord: lobby.secretWord,
-          civiliansWin: Object.values(votes).filter(v => v === impostor).length >
-                        lobby.players.length / 2
+          votes: Object.fromEntries(lobby.players.map(p => [p.name, p.vote])),
+          secretWord: lobby.word,
+          hint: lobby.hint
         });
-
-        lobby.phase = 'lobby';
+        lobby.phase = 'results';
       }
     }
 
-    if (data.type === 'restart') {
-      if (!lobby.restartReady.includes(playerId)) lobby.restartReady.push(playerId);
-      const active = lobby.players.filter(p => !p.disconnected).length;
-      if (lobby.restartReady.length === active) startGame(lobby);
+    if (msg.type === 'restart') {
+      lobby.restartReady.push(player.id);
+      if (lobby.restartReady.length === lobby.players.length) {
+        startGame(lobby);
+      }
     }
-  });
-
-  ws.on('close', () => {
-    if (!player || !lobbies[lobbyId]) return;
-    player.disconnected = true;
-
-    setTimeout(() => {
-      const lobby = lobbies[lobbyId];
-      if (!lobby) return;
-      lobby.players = lobby.players.filter(p => !p.disconnected);
-      if (lobby.players.length === 0) delete lobbies[lobbyId];
-    }, 15000);
   });
 });
