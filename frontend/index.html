@@ -1,68 +1,36 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
-  />
-  <title>Impostor</title>
-  <link rel="stylesheet" href="style.css" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
+<div id="lobbyScreen">
+  <input id="name" placeholder="Name">
+  <input id="lobby" placeholder="Lobby Code">
+  <button id="joinBtn">Join</button>
+  <button id="startBtn">Start</button>
+  <div id="players"></div>
+</div>
 
-    <!-- LOBBY -->
-    <div class="card lobby-card">
-      <h1>🕵️ Impostor</h1>
+<div id="gameScreen" class="hidden">
+  <div id="role"></div>
+  <div id="secret"></div>
+  <div id="turn"></div>
+  <input id="wordInput">
+  <button id="submitBtn">Submit</button>
 
-      <input id="nickname" placeholder="Your name" />
-      <input id="lobbyId" placeholder="Lobby code (optional)" />
+  <h3>Round 1</h3>
+  <div id="round1"></div>
 
-      <button id="join">Join Lobby</button>
+  <h3>Round 2</h3>
+  <div id="round2"></div>
 
-      <div id="players" class="players"></div>
-      <button id="start" disabled>Start Game</button>
-    </div>
+  <div id="voting"></div>
+  <div id="results"></div>
+  <button id="restartBtn">Restart</button>
+</div>
 
-    <!-- GAME -->
-    <div class="card game-card hidden">
-
-      <!-- ROLE REVEAL -->
-      <div id="roleReveal" class="role-reveal hidden">
-        <div class="role-card-inner">
-          <div class="role-front"></div>
-          <div class="role-back">
-            <div id="roleText"></div>
-            <div id="word"></div>
-          </div>
-        </div>
-      </div>
-
-      <div id="turn" class="turn"></div>
-
-      <div class="rounds">
-        <div class="round">
-          <h3>Round 1</h3>
-          <div id="round1"></div>
-        </div>
-        <div class="round">
-          <h3>Round 2</h3>
-          <div id="round2"></div>
-        </div>
-      </div>
-
-      <input id="input" placeholder="Your word" />
-      <button id="submit">Submit</button>
-
-      <div id="voting"></div>
-      <div id="results"></div>
-
-      <button id="restart" class="hidden">Restart Game</button>
-    </div>
-
-  </div>
-
-  <script src="app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
