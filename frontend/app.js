@@ -90,6 +90,9 @@ function connect() {
     }
 
     if (d.type === 'startVoting') {
+      // --- ADD THIS LINE to clear the old turn display ---
+      turnEl.textContent = '';
+      // 
       voting.innerHTML = '<h3>Vote</h3>' +
         d.players
           .filter(p => p !== nickname.value)
