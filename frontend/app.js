@@ -62,6 +62,13 @@ function connect() {
     if (d.type === 'gameStart') {
       lobbyCard.classList.add('hidden');
       gameCard.classList.remove('hidden');
+      
+      // --- CHANGED: Reset UI for new game ---
+      results.innerHTML = ''; 
+      restart.classList.add('hidden');
+      restart.style.opacity = '1';
+      restart.innerText = 'Restart Game';
+      // --------------------------------------
 
       roleReveal.classList.remove('hidden');
       roleBack.className = `role-back ${d.role}`;
@@ -85,14 +92,18 @@ function connect() {
     if (d.type === 'startVoting') {
       voting.innerHTML = '<h3>Vote</h3>' +
         d.players
-          .filter(p => p !== nickname.value) // cannot vote for self
-          .map(p => `<button onclick="vote('${p}')">${p}</button>`)
+          .filter(p => p !== nickname.value)
+          // --- CHANGED: Add class and pass 'this' ---
+          .map(p => `<button class="vote-btn" onclick="vote('${p}', this)">${p}</button>`)
           .join('');
     }
 
     if (d.type === 'gameEnd') {
+      // --- CHANGED: Show winner and restart button ---
+      const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
+      
       results.innerHTML =
-        `<h3>Results</h3>` +
+        `<h2 style="color:${winnerColor}; text-align:center">${d.winner} Won!</h2>` +
         `<div><b>Word:</b> ${capitalize(d.secretWord)}</div>` +
         `<div><b>Hint:</b> ${capitalize(d.hint)}</div><hr>` +
         d.roles.map(r =>
@@ -120,6 +131,25 @@ submit.onclick = () => {
   input.value = '';
 };
 
-restart.onclick = () => ws.send(JSON.stringify({ type: 'restart' }));
+restart.onclick = () => {
+  ws.send(JSON.stringify({ type: 'restart' }));
+  // --- CHANGED: Visual feedback ---
+  restart.style.opacity = '0.5';
+  restart.innerText = 'Waiting for others...';
+};
 
-window.vote = v => ws.send(JSON.stringify({ type: 'vote', vote: v }));
+window.vote = (v, btnElement) => {
+  ws.send(JSON.stringify({ type: 'vote', vote: v }));
+  
+  // --- CHANGED: Visual feedback (grey out others) ---
+  const buttons = document.querySelectorAll('.vote-btn');
+  buttons.forEach(b => {
+    if (b === btnElement) {
+      b.style.background = '#fff';
+      b.style.color = '#000';
+    } else {
+      b.style.opacity = '0.3';
+      b.style.pointerEvents = 'none';
+    }
+  });
+};
