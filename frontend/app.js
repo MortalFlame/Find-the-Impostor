@@ -55,7 +55,8 @@ function connect() {
 
     if (d.type === 'lobbyUpdate') {
       players.innerHTML = d.players.join('<br>');
-      start.disabled = d.players.length < 3;
+      // Disable start button for non-owners
+      start.disabled = d.players.length < 3 || d.owner !== playerId;
     }
 
     if (d.type === 'gameStart') {
@@ -99,7 +100,7 @@ function connect() {
              ${r.name}: ${r.role.charAt(0).toUpperCase() + r.role.slice(1)}
            </div>`).join('') +
         '<hr><b>Votes</b><br>' +
-        Object.entries(d.votes).map(([k,v]) => `${k} → ${v}`).join('<br>');
+        Object.entries(d.votes).map(([k,v]) => `${k} \u2192 ${v}`).join('<br>');
 
       voting.innerHTML = '';
       restart.classList.remove('hidden');
