@@ -1,21 +1,19 @@
 const express = require('express');
 const cors = require('cors');
 const { WebSocketServer } = require('ws');
-const crypto = require('crypto');
 const fs = require('fs');
+const crypto = require('crypto');
+const path = require('path');
 
 const app = express();
 app.use(cors());
-app.use(express.static('../frontend'));
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 10000;
-const server = app.listen(PORT, () => console.log('Server running on', PORT));
+const server = app.listen(PORT, () => console.log('Server running', PORT));
 const wss = new WebSocketServer({ server });
 
-const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
-
-const TURN_TIMEOUT = 30000;
-const RECONNECT_TIMEOUT = 30000;
+const words = JSON.parse(fs.readFileSync(path.join(__dirname, 'words.json'), 'utf8'));
 
 const PHASES = {
   LOBBY: 'lobby',
@@ -25,8 +23,11 @@ const PHASES = {
   RESULTS: 'results'
 };
 
-let lobbies = {};
+const TURN_TIMEOUT = 30000; // 30s per turn
+const RECONNECT_TIMEOUT = 30000; // 30s grace to reconnect
+
 let usedIndexes = [];
+let lobbies = {};
 
 function getRandomWord() {
   if (usedIndexes.length === words.length) usedIndexes = [];
@@ -38,9 +39,7 @@ function getRandomWord() {
 
 function broadcast(lobby, data) {
   lobby.players.forEach(p => {
-    if (p.ws && p.ws.readyState === 1) {
-      p.ws.send(JSON.stringify(data));
-    }
+    if (p.ws?.readyState === 1) p.ws.send(JSON.stringify(data));
   });
 }
 
@@ -48,6 +47,7 @@ function getState(lobby) {
   return {
     type: 'state',
     phase: lobby.phase,
+    hostId: lobby.hostId,
     players: lobby.players.map(p => ({
       name: p.name,
       connected: p.connected,
@@ -57,6 +57,11 @@ function getState(lobby) {
     round2: lobby.round2,
     currentPlayer: lobby.players[lobby.turn]?.name || null
   };
+}
+
+function migrateHost(lobby) {
+  const nextHost = lobby.players.find(p => p.connected && !p.spectator);
+  if (nextHost) lobby.hostId = nextHost.id;
 }
 
 function startGame(lobby) {
@@ -70,10 +75,10 @@ function startGame(lobby) {
   lobby.word = word;
   lobby.hint = hint;
 
-  const active = lobby.players.filter(p => !p.spectator);
-  const impostorIndex = crypto.randomInt(active.length);
+  const activePlayers = lobby.players.filter(p => !p.spectator);
+  const impostorIndex = crypto.randomInt(activePlayers.length);
 
-  active.forEach((p, i) => {
+  activePlayers.forEach((p, i) => {
     p.role = i === impostorIndex ? 'impostor' : 'civilian';
     p.vote = null;
     p.ws?.send(JSON.stringify({
@@ -94,123 +99,129 @@ wss.on('connection', ws => {
   ws.on('message', raw => {
     const msg = JSON.parse(raw);
 
-    /* JOIN */
-    if (msg.type === 'join') {
-      const id = msg.lobbyId || crypto.randomInt(1000, 9999).toString();
-      lobby = lobbies[id] ||= {
-        id,
-        hostId: msg.playerId,
-        players: [],
-        phase: PHASES.LOBBY
-      };
+    // JOIN LOBBY
+    if (msg.type === 'joinLobby') {
+      const id = msg.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
+      lobby = lobbies[id] ||= { id, hostId: msg.playerId, phase: PHASES.LOBBY, players: [] };
 
       player = lobby.players.find(p => p.id === msg.playerId);
       if (!player) {
-        player = {
-          id: msg.playerId,
-          name: msg.name,
-          ws,
-          connected: true,
-          spectator: lobby.phase !== PHASES.LOBBY
-        };
+        player = { id: msg.playerId, name: msg.name, ws, connected: true, spectator: lobby.phase !== PHASES.LOBBY };
         lobby.players.push(player);
       } else {
         player.ws = ws;
         player.connected = true;
       }
 
-      ws.send(JSON.stringify({ type: 'joined', lobbyId: id, host: lobby.hostId }));
+      ws.send(JSON.stringify({ type: 'lobbyAssigned', lobbyId: id, hostId: lobby.hostId }));
       broadcast(lobby, getState(lobby));
     }
 
     if (!player || !lobby) return;
     player.lastActionAt = Date.now();
 
-    /* START GAME */
-    if (msg.type === 'start' && lobby.phase === PHASES.LOBBY) {
-      if (player.id !== lobby.hostId) return;
-      startGame(lobby);
+    // START GAME (only host)
+    if (msg.type === 'startGame' && player.id === lobby.hostId && lobby.phase === PHASES.LOBBY) {
+      if (lobby.players.filter(p => !p.spectator).length >= 3) startGame(lobby);
     }
 
-    /* WORD */
-    if (msg.type === 'word' && lobby.players[lobby.turn]?.id === player.id) {
-      (lobby.phase === PHASES.ROUND1 ? lobby.round1 : lobby.round2)
-        .push({ name: player.name, word: msg.word });
+    // SUBMIT WORD
+    if (msg.type === 'submitWord') {
+      if (lobby.players[lobby.turn]?.id !== player.id) return;
+
+      const entry = { name: player.name, word: msg.word };
+      (lobby.phase === PHASES.ROUND1 ? lobby.round1 : lobby.round2).push(entry);
 
       lobby.turn++;
       lobby.turnStartedAt = Date.now();
 
       if (lobby.turn >= lobby.players.filter(p => !p.spectator).length) {
         lobby.turn = 0;
-        lobby.phase =
-          lobby.phase === PHASES.ROUND1 ? PHASES.ROUND2 : PHASES.VOTING;
+        lobby.phase = lobby.phase === PHASES.ROUND1 ? PHASES.ROUND2 : PHASES.VOTING;
       }
 
-      broadcast(lobby, getState(lobby));
+      if (lobby.phase === PHASES.VOTING) {
+        broadcast(lobby, { type: 'startVoting', players: lobby.players.filter(p => !p.spectator).map(p => p.name) });
+      } else {
+        broadcast(lobby, getState(lobby));
+      }
     }
 
-    /* VOTE */
+    // VOTE
     if (msg.type === 'vote') {
+      if (msg.vote === player.name) return;
       player.vote = msg.vote;
-      if (lobby.players.every(p => p.vote || p.spectator)) {
-        broadcast(lobby, {
-          type: 'results',
-          word: lobby.word,
-          hint: lobby.hint,
-          roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-          votes: Object.fromEntries(lobby.players.map(p => [p.name, p.vote]))
-        });
+
+      if (lobby.players.filter(p => !p.spectator).every(p => p.vote)) {
         lobby.phase = PHASES.RESULTS;
+        broadcast(lobby, {
+          type: 'gameEnd',
+          roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+          votes: Object.fromEntries(lobby.players.map(p => [p.name, p.vote])),
+          secretWord: lobby.word,
+          hint: lobby.hint
+        });
       }
     }
 
-    /* EXIT */
+    // RESTART
+    if (msg.type === 'restart') {
+      lobby.players.forEach(p => p.vote = null);
+      lobby.players.forEach(p => p.spectator = false);
+      startGame(lobby);
+    }
+
+    // EXIT LOBBY
     if (msg.type === 'exit') {
       lobby.players = lobby.players.filter(p => p.id !== player.id);
-      if (lobby.hostId === player.id && lobby.players[0]) {
-        lobby.hostId = lobby.players[0].id;
-      }
+      if (player.id === lobby.hostId) migrateHost(lobby);
+      ws.send(JSON.stringify({ type: 'exited' }));
       broadcast(lobby, getState(lobby));
     }
   });
 
   ws.on('close', () => {
-    if (!player) return;
+    if (!player || !lobby) return;
     player.connected = false;
     player.disconnectedAt = Date.now();
+    if (player.id === lobby.hostId) migrateHost(lobby);
+    broadcast(lobby, getState(lobby));
   });
 });
 
 /* ================= AFK HANDLER ================= */
-
 setInterval(() => {
   Object.values(lobbies).forEach(lobby => {
     if (![PHASES.ROUND1, PHASES.ROUND2, PHASES.VOTING].includes(lobby.phase)) return;
+    const activePlayers = lobby.players.filter(p => !p.spectator);
+    const current = activePlayers[lobby.turn];
+    if (!current) return;
+
     if (Date.now() - lobby.turnStartedAt < TURN_TIMEOUT) return;
 
-    const p = lobby.players[lobby.turn];
-    if (!p) return;
-
+    // Auto action
     if (lobby.phase === PHASES.VOTING) {
-      p.vote = null;
+      current.vote = null;
     } else {
-      (lobby.phase === PHASES.ROUND1 ? lobby.round1 : lobby.round2)
-        .push({ name: p.name, word: '...' });
+      (lobby.phase === PHASES.ROUND1 ? lobby.round1 : lobby.round2).push({ name: current.name, word: '...' });
     }
 
     lobby.turn++;
     lobby.turnStartedAt = Date.now();
+
+    if (lobby.turn >= activePlayers.length) {
+      lobby.turn = 0;
+      lobby.phase = lobby.phase === PHASES.ROUND1 ? PHASES.ROUND2 : PHASES.VOTING;
+    }
+
     broadcast(lobby, getState(lobby));
   });
 }, 1000);
 
-/* ================= CLEANUP ================= */
-
+/* ================= RECONNECT CLEANUP ================= */
 setInterval(() => {
   const now = Date.now();
   Object.values(lobbies).forEach(lobby => {
-    lobby.players = lobby.players.filter(p =>
-      p.connected || now - p.disconnectedAt < RECONNECT_TIMEOUT
-    );
+    lobby.players = lobby.players.filter(p => p.connected || now - (p.disconnectedAt||0) < RECONNECT_TIMEOUT);
   });
 }, 5000);
