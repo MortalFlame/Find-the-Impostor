@@ -59,6 +59,21 @@ function createLobby(host) {
   return lobbies[id];
 }
 
+function statePayload(lobby) {
+  return {
+    type: 'state',
+    phase: lobby.phase,
+    hostId: lobby.hostId,
+    players: lobby.players.map(p => ({
+      name: p.name,
+      connected: p.connected
+    })),
+    round1: lobby.round1,
+    round2: lobby.round2,
+    currentPlayer: lobby.players[lobby.turn]?.name
+  };
+}
+
 function startGame(lobby) {
   lobby.phase = PHASES.ROUND1;
   lobby.turn = 0;
@@ -81,21 +96,6 @@ function startGame(lobby) {
   });
 
   broadcast(lobby, statePayload(lobby));
-}
-
-function statePayload(lobby) {
-  return {
-    type: 'state',
-    phase: lobby.phase,
-    hostId: lobby.hostId,
-    players: lobby.players.map(p => ({
-      name: p.name,
-      connected: p.connected
-    })),
-    round1: lobby.round1,
-    round2: lobby.round2,
-    currentPlayer: lobby.players[lobby.turn]?.name
-  };
 }
 
 function migrateHost(lobby) {
