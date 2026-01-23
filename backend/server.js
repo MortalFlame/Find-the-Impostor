@@ -112,59 +112,63 @@ ws.on('close', () => {
     const msg = JSON.parse(raw);
 
     if (msg.type === 'joinLobby') {
-      lobbyId = msg.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
-      if (!lobbies[lobbyId]) lobbies[lobbyId] = { players: [], phase: 'lobby' };
-      const lobby = lobbies[lobbyId];
+  lobbyId = msg.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
+  if (!lobbies[lobbyId]) lobbies[lobbyId] = { players: [], phase: 'lobby', hostId: null };
+  const lobby = lobbies[lobbyId];
 
-player = lobby.players.find(p => p.id === msg.playerId);
-if (!player) {
-  // new player
-  player = {
-    id: msg.playerId,
-    name: msg.name,
-    ws,
-    connected: true
-  };
-  // mid-game joiners become spectators
-  if (lobby.phase !== 'lobby') player.spectator = true;
+  player = lobby.players.find(p => p.id === msg.playerId);
+  if (!player) {
+    // new player
+    player = {
+      id: msg.playerId,
+      name: msg.name,
+      ws,
+      connected: true
+    };
+    // mid-game joiners become spectators
+    if (lobby.phase !== 'lobby') player.spectator = true;
 
-  lobby.players.push(player);
-} else {
-  // reconnect
-  player.ws = ws;
-  player.connected = true;
-  delete player.spectator; // reconnecting player is no longer spectator
+    lobby.players.push(player);
+
+    // assign host if none exists
+    if (!lobby.hostId) lobby.hostId = player.id;
+
+  } else {
+    // reconnect
+    player.ws = ws;
+    player.connected = true;
+    delete player.spectator; // reconnecting player is no longer spectator
+  }
+
+  // BROADCAST CONNECTION STATUS
+  broadcast(lobby, {
+    type: 'playerStatus',
+    players: lobby.players.map(p => ({
+      name: p.name,
+      connected: p.connected
+    }))
+  });
+
+  // BROADCAST LOBBY UPDATE (with host info)
+  broadcast(lobby, { 
+    type: 'lobbyUpdate', 
+    players: lobby.players.map(p => p.name),
+    isHost: player.id === lobby.hostId
+  });
+
+  ws.send(JSON.stringify({ type: 'lobbyAssigned', lobbyId }));
+
+  // If player joined as spectator
+  if (player.spectator) {
+    ws.send(JSON.stringify({
+      type: 'spectator',
+      phase: lobby.phase,
+      round1: lobby.round1,
+      round2: lobby.round2
+    }));
+  }
+  return;
 }
-
-// BROADCAST CONNECTION STATUS
-broadcast(lobby, {
-  type: 'playerStatus',
-  players: lobby.players.map(p => ({
-    name: p.name,
-    connected: p.connected
-  }))
-});
-
-// BROADCAST LOBBY UPDATE (with host info)
-broadcast(lobby, { 
-  type: 'lobbyUpdate', 
-  players: lobby.players.map(p => p.name),
-  isHost: player.id === lobby.hostId
-});
-
-ws.send(JSON.stringify({ type: 'lobbyAssigned', lobbyId }));
-
-// If player joined as spectator
-if (player.spectator) {
-  ws.send(JSON.stringify({
-    type: 'spectator',
-    phase: lobby.phase,
-    round1: lobby.round1,
-    round2: lobby.round2
-  }));
-}
-      return;
-    }
 
     if (!player) return;
     const lobby = lobbies[lobbyId];
