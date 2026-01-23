@@ -115,68 +115,68 @@ wss.on('connection', ws => {
 
     // ------------- JOIN LOBBY FIXED -------------
     if (msg.type === 'joinLobby') {
-      // Generate lobbyId if client did not provide one
-      lobbyId = msg.lobbyId && msg.lobbyId.trim() ? msg.lobbyId.trim() : Math.floor(1000 + Math.random() * 9000).toString();
+  // 1️⃣ Generate lobbyId if client did not provide one
+  lobbyId = msg.lobbyId && msg.lobbyId.trim() ? msg.lobbyId.trim() : Math.floor(1000 + Math.random() * 9000).toString();
 
-      // Create lobby if it doesn't exist
-      if (!lobbies[lobbyId]) {
-        lobbies[lobbyId] = { players: [], phase: 'lobby', hostId: null, round1: [], round2: [], restartReady: [] };
-      }
+  // 2️⃣ Create lobby if it doesn't exist
+  if (!lobbies[lobbyId]) {
+    lobbies[lobbyId] = { players: [], phase: 'lobby', hostId: null, round1: [], round2: [], restartReady: [] };
+  }
 
-      const lobby = lobbies[lobbyId];
+  const lobby = lobbies[lobbyId];
 
-      // Find existing player (reconnect) or create new
-      player = lobby.players.find(p => p.id === msg.playerId);
-      if (!player) {
-        player = {
-          id: msg.playerId,
-          name: msg.name,
-          ws,
-          connected: true
-        };
+  // 3️⃣ Find existing player (reconnect) or create new
+  player = lobby.players.find(p => p.id === msg.playerId);
+  if (!player) {
+    player = {
+      id: msg.playerId,
+      name: msg.name,
+      ws,
+      connected: true
+    };
 
-        // Mid-game joiners become spectators
-        if (lobby.phase !== 'lobby') player.spectator = true;
+    // Mid-game joiners become spectators
+    if (lobby.phase !== 'lobby') player.spectator = true;
 
-        lobby.players.push(player);
+    lobby.players.push(player);
 
-        // Assign host if none exists
-        if (!lobby.hostId) lobby.hostId = player.id;
-      } else {
-        // Reconnect
-        player.ws = ws;
-        player.connected = true;
-        delete player.spectator; // no longer spectator
-      }
+    // Assign host if none exists
+    if (!lobby.hostId) lobby.hostId = player.id;
+  } else {
+    // Reconnect
+    player.ws = ws;
+    player.connected = true;
+    delete player.spectator; // no longer spectator
+  }
 
-      // Send lobbyAssigned with lobbyId
-      ws.send(JSON.stringify({ type: 'lobbyAssigned', lobbyId }));
+  // 4️⃣ Send lobbyAssigned with lobbyId
+  ws.send(JSON.stringify({ type: 'lobbyAssigned', lobbyId }));
 
-      // Broadcast player status
-      broadcast(lobby, {
-        type: 'playerStatus',
-        players: lobby.players.map(p => ({ name: p.name, connected: p.connected }))
-      });
+  // 5️⃣ Broadcast player status
+  broadcast(lobby, {
+    type: 'playerStatus',
+    players: lobby.players.map(p => ({ name: p.name, connected: p.connected }))
+  });
 
-      // Broadcast lobby update (players + host info)
-      broadcast(lobby, {
-        type: 'lobbyUpdate',
-        players: lobby.players.map(p => p.name),
-        isHost: player.id === lobby.hostId
-      });
+  // 6️⃣ Broadcast lobby update (players + host info)
+  broadcast(lobby, {
+    type: 'lobbyUpdate',
+    players: lobby.players.map(p => p.name),
+    isHost: player.id === lobby.hostId
+  });
 
-      // Send spectator info if joining mid-game
-      if (player.spectator) {
-        ws.send(JSON.stringify({
-          type: 'spectator',
-          phase: lobby.phase,
-          round1: lobby.round1,
-          round2: lobby.round2
-        }));
-      }
+  // 7️⃣ Send spectator info if joining mid-game
+  if (player.spectator) {
+    ws.send(JSON.stringify({
+      type: 'spectator',
+      phase: lobby.phase,
+      round1: lobby.round1,
+      round2: lobby.round2
+    }));
+  }
 
-      return;
-    }
+  return; // important to stop further processing
+}
 
     if (!player) return;
     const lobby = lobbies[lobbyId];
