@@ -120,35 +120,43 @@ wss.on('connection', ws => {
     }
 
     // --- SUBMIT WORD ---
+    // --- SUBMIT WORD ---
     if (msg.type === 'submitWord') {
       if (lobby.players[lobby.turn].id !== player.id) return;
 
       const entry = { name: player.name, word: msg.word };
       lobby.phase === 'round1' ? lobby.round1.push(entry) : lobby.round2.push(entry);
 
-      lobby.turn++;
+      lobby.turn++; // Move to the next player
 
+      // Check if the round is over
       if (lobby.turn >= lobby.players.length) {
-        lobby.turn = 0;
-        if (lobby.phase === 'round1') lobby.phase = 'round2';
-        else lobby.phase = 'voting';
+        // This round has finished
+        lobby.turn = 0; // Reset turn for the next phase
+
+        if (lobby.phase === 'round1') {
+          lobby.phase = 'round2';
+        } else if (lobby.phase === 'round2') {
+          lobby.phase = 'voting';
+        }
       }
 
+      // Send updates to all players
       if (lobby.phase === 'voting') {
         broadcast(lobby, {
           type: 'startVoting',
           players: lobby.players.map(p => p.name)
         });
-        return;
+      } else {
+        // Send turn update for round 1 or round 2
+        broadcast(lobby, {
+          type: 'turnUpdate',
+          phase: lobby.phase,
+          round1: lobby.round1,
+          round2: lobby.round2,
+          currentPlayer: lobby.players[lobby.turn].name
+        });
       }
-
-      broadcast(lobby, {
-        type: 'turnUpdate',
-        phase: lobby.phase,
-        round1: lobby.round1,
-        round2: lobby.round2,
-        currentPlayer: lobby.players[lobby.turn].name
-      });
     }
 
     // --- VOTE ---
