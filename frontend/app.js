@@ -26,11 +26,6 @@ const voting = document.getElementById('voting');
 const results = document.getElementById('results');
 const restart = document.getElementById('restart');
 
-// NEW ELEMENTS
-const exitLobby = document.getElementById('exitLobby');
-const connectionStatus = document.getElementById('connectionStatus');
-let manualExit = false;
-
 let playerId = localStorage.getItem('playerId');
 if (!playerId) {
   playerId = crypto.randomUUID();
@@ -42,7 +37,6 @@ function capitalize(str) {
 }
 
 function connect() {
-  manualExit = false;      // ← ADD THIS LINE
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
@@ -57,29 +51,13 @@ function connect() {
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
 
-    // ----------------- LOBBY ASSIGNED -----------------
-    if (d.type === 'lobbyAssigned') {
-  // update lobby input field so client knows lobby code
-  lobbyId.value = d.lobbyId;
-  lobbyCard.classList.remove('hidden');
-  gameCard.classList.add('hidden');
-  exitLobby.classList.remove('hidden'); // show exit button
-}
+    if (d.type === 'lobbyAssigned') lobbyId.value = d.lobbyId;
 
-    // ----------------- PLAYER STATUS -----------------
-    if (d.type === 'playerStatus') {
-      connectionStatus.innerHTML = d.players.map(p =>
-        `<div><span style="color:${p.connected ? '#2ecc71' : '#e74c3c'}">●</span> ${p.name}</div>`
-      ).join('');
-    }
-
-    // ----------------- LOBBY UPDATE -----------------
     if (d.type === 'lobbyUpdate') {
       players.innerHTML = d.players.join('<br>');
-      start.disabled = d.players.length < 3 || !d.isHost; // disable if not host
+      start.disabled = d.players.length < 3;
     }
 
-    // ----------------- GAME START -----------------
     if (d.type === 'gameStart') {
       lobbyCard.classList.add('hidden');
       gameCard.classList.remove('hidden');
@@ -94,8 +72,8 @@ function connect() {
       wordEl.textContent = capitalize(d.word);
     }
 
-    // ----------------- TURN UPDATE -----------------
     if (d.type === 'turnUpdate') {
+      // persist round 1 words during round 2
       round1El.innerHTML = d.round1.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
       round2El.innerHTML = d.round2.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
 
@@ -103,7 +81,6 @@ function connect() {
       submit.disabled = d.currentPlayer !== nickname.value;
     }
 
-    // ----------------- VOTING -----------------
     if (d.type === 'startVoting') {
       voting.innerHTML = '<h3>Vote</h3>' +
         d.players
@@ -112,7 +89,6 @@ function connect() {
           .join('');
     }
 
-    // ----------------- GAME END -----------------
     if (d.type === 'gameEnd') {
       results.innerHTML =
         `<h3>Results</h3>` +
@@ -128,29 +104,11 @@ function connect() {
       voting.innerHTML = '';
       restart.classList.remove('hidden');
     }
-
-    // ----------------- SPECTATOR -----------------
-    if (d.type === 'spectator') {
-      lobbyCard.classList.add('hidden');
-      gameCard.classList.remove('hidden');
-      turnEl.textContent = `Spectator Mode - Phase: ${d.phase}`;
-      round1El.innerHTML = d.round1.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
-      round2El.innerHTML = d.round2.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
-      submit.disabled = true;
-    }
   };
 
-  ws.onclose = () => {
-  exitLobby.classList.add('hidden');
-
-  if (!manualExit) {
-    // accidental disconnect → reconnect
-    setTimeout(connect, 2000);
-  }
-};
+  ws.onclose = () => setTimeout(connect, 2000);
 }
 
-// ----------------- BUTTON EVENTS -----------------
 join.onclick = connect;
 
 start.onclick = () => ws.send(JSON.stringify({ type: 'startGame' }));
@@ -163,29 +121,4 @@ submit.onclick = () => {
 
 restart.onclick = () => ws.send(JSON.stringify({ type: 'restart' }));
 
-exitLobby.onclick = () => {
-  manualExit = true;
-
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.close();
-  }
-
-  // Reset UI
-  lobbyCard.classList.remove('hidden');
-  gameCard.classList.add('hidden');
-  exitLobby.classList.add('hidden');
-};
-
-  // Reset UI
-  lobbyCard.classList.remove('hidden');
-  gameCard.classList.add('hidden');
-
-  players.innerHTML = '';
-  lobbyId.value = '';
-  start.disabled = true;
-
-  exitLobby.classList.add('hidden');
-};
-
-// ----------------- VOTE FUNCTION -----------------
 window.vote = v => ws.send(JSON.stringify({ type: 'vote', vote: v }));
