@@ -59,12 +59,11 @@ function connect() {
 
     // ----------------- LOBBY ASSIGNED -----------------
     if (d.type === 'lobbyAssigned') {
+  // update lobby input field so client knows lobby code
   lobbyId.value = d.lobbyId;
-
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
-
-  exitLobby.classList.remove('hidden');
+  exitLobby.classList.remove('hidden'); // show exit button
 }
 
     // ----------------- PLAYER STATUS -----------------
