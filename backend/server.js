@@ -75,7 +75,9 @@ wss.on('connection', ws => {
 
     if (msg.type === 'joinLobby') {
       lobbyId = msg.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
-      if (!lobbies[lobbyId]) lobbies[lobbyId] = { players: [], phase: 'lobby' };
+      if (!lobbies[lobbyId]) {
+        lobbies[lobbyId] = { players: [], phase: 'lobby', owner: msg.playerId }; // Set owner
+      }
       const lobby = lobbies[lobbyId];
 
       player = lobby.players.find(p => p.id === msg.playerId);
@@ -95,6 +97,10 @@ wss.on('connection', ws => {
     const lobby = lobbies[lobbyId];
 
     if (msg.type === 'startGame' && lobby.phase === 'lobby') {
+      if (lobby.owner !== player.id) { // Only owner can start the game
+        ws.send(JSON.stringify({ type: 'error', message: 'Only the lobby owner can start the game.' }));
+        return;
+      }
       startGame(lobby);
     }
 
