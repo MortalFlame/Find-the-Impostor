@@ -29,6 +29,7 @@ const restart = document.getElementById('restart');
 // NEW ELEMENTS
 const exitLobby = document.getElementById('exitLobby');
 const connectionStatus = document.getElementById('connectionStatus');
+let manualExit = false;
 
 let playerId = localStorage.getItem('playerId');
 if (!playerId) {
@@ -41,6 +42,7 @@ function capitalize(str) {
 }
 
 function connect() {
+  manualExit = false;      // ← ADD THIS LINE
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
@@ -141,6 +143,11 @@ function connect() {
 
   ws.onclose = () => {
   exitLobby.classList.add('hidden');
+
+  if (!manualExit) {
+    // accidental disconnect → reconnect
+    setTimeout(connect, 2000);
+  }
 };
 }
 
@@ -158,9 +165,17 @@ submit.onclick = () => {
 restart.onclick = () => ws.send(JSON.stringify({ type: 'restart' }));
 
 exitLobby.onclick = () => {
+  manualExit = true;
+
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.close();
   }
+
+  // Reset UI
+  lobbyCard.classList.remove('hidden');
+  gameCard.classList.add('hidden');
+  exitLobby.classList.add('hidden');
+};
 
   // Reset UI
   lobbyCard.classList.remove('hidden');
