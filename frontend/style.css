@@ -58,10 +58,6 @@ button {
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-button + button {
-  margin-top: 8px;
-}
-
 button:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 10px 24px rgba(120,120,255,0.45);
@@ -74,18 +70,6 @@ button:disabled { opacity: 0.4; }
   opacity: 0.9;
   margin: 10px 0;
 }
-
-/* CONNECTION DOTS */
-.dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-left: 6px;
-}
-
-.green { background: #2ecc71; }
-.red { background: #e74c3c; }
 
 /* ROLE REVEAL */
 .role-reveal {
@@ -179,14 +163,6 @@ button:disabled { opacity: 0.4; }
 #results {
   margin-top: 12px;
   font-size: 14px;
-}
-
-/* STATUS TEXT */
-#status {
-  font-size: 11px;
-  text-align: center;
-  opacity: 0.6;
-  margin-top: 10px;
 }
 
 /* ANIMATIONS */
