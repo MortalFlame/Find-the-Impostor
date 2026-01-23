@@ -152,21 +152,50 @@ wss.on('connection', ws => {
     }
 
     // --- VOTE ---
+        // ... (previous code remains unchanged)
+
+    // --- VOTE ---
     if (msg.type === 'vote') {
       if (msg.vote === player.name) return;
       player.vote = msg.vote;
 
       if (lobby.players.every(p => p.vote)) {
+        // Calculate Winner
+        const voteCounts = {};
+        lobby.players.forEach(p => {
+          voteCounts[p.vote] = (voteCounts[p.vote] || 0) + 1;
+        });
+
+        let ejected = null;
+        let maxVotes = 0;
+
+        // Find player with most votes (if tie, ejected remains null/tie)
+        Object.entries(voteCounts).forEach(([name, count]) => {
+          if (count > maxVotes) {
+            maxVotes = count;
+            ejected = name;
+          } else if (count === maxVotes) {
+            ejected = null; // Tie implies no majority ejection
+          }
+        });
+
+        const impostor = lobby.players.find(p => p.role === 'impostor');
+        const winner = (ejected === impostor.name) ? 'Civilians' : 'Impostor';
+
         broadcast(lobby, {
           type: 'gameEnd',
           roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
           votes: Object.fromEntries(lobby.players.map(p => [p.name, p.vote])),
           secretWord: lobby.word,
-          hint: lobby.hint
+          hint: lobby.hint,
+          winner // <--- Send winner
         });
         lobby.phase = 'results';
       }
     }
+
+    // ... (rest of file remains unchanged)
+
 
     // --- RESTART ---
     if (msg.type === 'restart') {
