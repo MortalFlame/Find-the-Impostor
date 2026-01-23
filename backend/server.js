@@ -113,9 +113,40 @@ ws.on('close', () => {
 
     if (msg.type === 'joinLobby') {
   // assign lobby ID (generate if empty)
-lobbyId = msg.lobbyId && msg.lobbyId.trim() ? msg.lobbyId : Math.floor(1000 + Math.random() * 9000).toString();
-if (!lobbies[lobbyId]) lobbies[lobbyId] = { players: [], phase: 'lobby', hostId: null };
+// Assign lobby ID (generate if empty)
+lobbyId = msg.lobbyId && msg.lobbyId.trim() ? msg.lobbyId.trim() : Math.floor(1000 + Math.random() * 9000).toString();
+
+// Create lobby if it doesn't exist
+if (!lobbies[lobbyId]) {
+    lobbies[lobbyId] = { players: [], phase: 'lobby', hostId: null };
+}
+
 const lobby = lobbies[lobbyId];
+
+// Find or create player
+player = lobby.players.find(p => p.id === msg.playerId);
+if (!player) {
+    // new player
+    player = {
+        id: msg.playerId,
+        name: msg.name,
+        ws,
+        connected: true
+    };
+
+    // mid-game joiners become spectators
+    if (lobby.phase !== 'lobby') player.spectator = true;
+
+    lobby.players.push(player);
+
+    // Assign host if none exists
+    if (!lobby.hostId) lobby.hostId = player.id;
+} else {
+    // reconnect
+    player.ws = ws;
+    player.connected = true;
+    delete player.spectator; // reconnecting player is no longer spectator
+}
 
   player = lobby.players.find(p => p.id === msg.playerId);
   if (!player) {
