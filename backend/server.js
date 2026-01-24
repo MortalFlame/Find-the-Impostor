@@ -12,7 +12,8 @@ const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, () => console.log('Server running'));
 const wss = new WebSocketServer({ 
   server,
-  perMessageDeflate: false
+  perMessageDeflate: false,
+  clientTracking: true
 });
 
 const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
@@ -208,7 +209,7 @@ wss.on('connection', (ws, req) => {
       console.log(`Closing idle connection: ${connectionId}`);
       ws.close(1000, 'Connection timeout');
     }
-  }, 30000);
+  }, 45000); // Increased to 45 seconds for spectators
 
   ws.on('message', (raw) => {
     clearTimeout(connectionTimeout);
@@ -315,6 +316,12 @@ wss.on('connection', (ws, req) => {
             player.isSpectator = false;
             player.role = null;
             lobby.players.push(player);
+            
+            // Notify the spectator they are now a player
+            ws.send(JSON.stringify({
+              type: 'roleChanged',
+              message: 'You are now a player for the next game!'
+            }));
             
             broadcast(lobby, { 
               type: 'lobbyUpdate', 
@@ -447,17 +454,30 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'restart') {
-        lobby.restartReady.push(player.id);
+        // Only add if not already in the array
+        if (!lobby.restartReady.includes(player.id)) {
+          lobby.restartReady.push(player.id);
+        }
         
         const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+        
+        // Send individual restart update to each player
+        lobby.players.forEach(p => {
+          if (p.ws?.readyState === 1) {
+            try {
+              p.ws.send(JSON.stringify({
+                type: 'restartUpdate',
+                readyCount: lobby.restartReady.length,
+                totalPlayers: connectedPlayers.length
+              }));
+            } catch (err) {
+              console.log(`Failed to send restart update to ${p.name}`);
+            }
+          }
+        });
+        
         if (lobby.restartReady.length === connectedPlayers.length) {
           startGame(lobby);
-        } else {
-          broadcast(lobby, {
-            type: 'restartUpdate',
-            readyCount: lobby.restartReady.length,
-            totalPlayers: connectedPlayers.length
-          });
         }
       }
 
@@ -482,6 +502,7 @@ wss.on('connection', (ws, req) => {
       
       player.lastDisconnectTime = Date.now();
       
+      // If game is in progress and it's this player's turn, skip them after 20 seconds
       if ((lobby.phase === 'round1' || lobby.phase === 'round2') && 
           lobby.players[lobby.turn]?.id === player.id) {
         
