@@ -23,6 +23,7 @@
   </div>
 
   <div class="app">
+    <!-- LOBBY -->
     <div class="card lobby-card">
       <h1>🕵️ Impostor</h1>
 
@@ -30,12 +31,13 @@
       <input id="lobbyId" placeholder="Lobby code (optional)" />
 
       <button id="join">Join Lobby</button>
+      <button id="start" disabled>Start Game</button>
       <button id="spectate">👁️ Join as Spectator</button>
 
       <div id="players" class="players"></div>
-      <button id="start" disabled>Start Game</button>
     </div>
 
+    <!-- GAME -->
     <div class="card game-card hidden">
       <div id="roleReveal" class="role-reveal hidden">
         <div class="role-card-inner">
