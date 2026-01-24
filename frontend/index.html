@@ -31,10 +31,8 @@
       <input id="lobbyId" placeholder="Lobby code (optional)" />
 
       <button id="join">Join Lobby</button>
-      <!-- SPACE ADDED BETWEEN JOIN AND START BUTTONS -->
       <button id="start" disabled>Start Game</button>
       <button id="spectate">👁️ Join as Spectator</button>
-      <!-- NEW: EXIT LOBBY BUTTON -->
       <button id="exitLobby" style="display:none;">Exit Lobby</button>
 
       <div id="players" class="players"></div>
@@ -52,7 +50,17 @@
         </div>
       </div>
 
-      <div id="turn" class="turn"></div>
+      <div class="turn-container">
+        <div id="turn" class="turn"></div>
+        <!-- NEW: Circular Timer -->
+        <div id="turnTimer" class="circular-timer hidden">
+          <svg class="timer-svg" viewBox="0 0 100 100">
+            <circle class="timer-base" cx="50" cy="50" r="45"></circle>
+            <circle class="timer-progress" cx="50" cy="50" r="45" stroke-dasharray="283" stroke-dashoffset="0"></circle>
+            <text class="timer-text" x="50" y="55" text-anchor="middle">30</text>
+          </svg>
+        </div>
+      </div>
 
       <div class="rounds">
         <div class="round">
