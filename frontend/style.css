@@ -45,6 +45,12 @@ input {
   font-size: 16px;
 }
 
+/* Disabled input for spectators */
+input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 button {
   width: 100%;
   padding: 14px;
@@ -58,6 +64,12 @@ button {
   transition: transform 0.1s, box-shadow 0.1s, filter 0.1s; /* Faster transition */
 }
 
+/* Spectator button */
+#spectate {
+  margin-top: 10px;
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+}
+
 /* Make clicks feel responsive */
 button:active {
   transform: scale(0.96);
@@ -66,7 +78,18 @@ button:active {
 
 button:hover:not(:disabled) {
   transform: translateY(-2px);
+}
+
+/* Different hover shadows for different buttons */
+#join:hover:not(:disabled),
+#start:hover:not(:disabled),
+#submit:hover:not(:disabled),
+#restart:hover:not(:disabled) {
   box-shadow: 0 10px 24px rgba(120,120,255,0.45);
+}
+
+#spectate:hover:not(:disabled) {
+  box-shadow: 0 10px 24px rgba(155, 89, 182, 0.45);
 }
 
 button:disabled { opacity: 0.4; }
@@ -75,6 +98,15 @@ button:disabled { opacity: 0.4; }
   text-align: center;
   opacity: 0.9;
   margin: 10px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Lobby player lists */
+.players b {
+  color: #6a8bff;
+  display: block;
+  margin-top: 10px;
 }
 
 /* ROLE REVEAL */
@@ -125,6 +157,13 @@ button:disabled { opacity: 0.4; }
   border: 2px solid #e74c3c;
 }
 
+/* Spectator role card */
+.role-back.spectator {
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  box-shadow: inset 0 0 60px rgba(0,0,0,0.7);
+  border: 2px solid #9b59b6;
+}
+
 #roleText {
   font-size: 22px;
   font-weight: 700;
@@ -161,9 +200,28 @@ button:disabled { opacity: 0.4; }
   text-align: center;
 }
 
+/* Voting buttons */
 #voting button {
   margin-top: 6px;
   background: linear-gradient(135deg, #ff5b5b, #ff8c5b);
+}
+
+#voting button:hover:not(:disabled) {
+  box-shadow: 0 10px 24px rgba(255, 91, 91, 0.45);
+}
+
+/* Spectator voting buttons */
+.spectator-vote-btn {
+  width: 100%;
+  padding: 14px;
+  margin-top: 6px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #34495e, #2c3e50);
+  color: #95a5a6;
+  text-align: center;
+  font-size: 16px;
+  border: 1px solid #7f8c8d;
+  cursor: not-allowed;
 }
 
 #results {
