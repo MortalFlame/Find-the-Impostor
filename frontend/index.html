@@ -10,9 +10,19 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app">
+  <div id="gameHeader" class="game-header hidden">
+    <div class="header-content">
+      <div class="lobby-info">
+        <span id="lobbyCodeDisplay" class="lobby-code">----</span>
+        <div class="connection-status">
+          <span class="status-dot" id="connectionDot"></span>
+          <span id="connectionText">Connecting...</span>
+        </div>
+      </div>
+    </div>
+  </div>
 
-    <!-- LOBBY -->
+  <div class="app">
     <div class="card lobby-card">
       <h1>🕵️ Impostor</h1>
 
@@ -26,10 +36,7 @@
       <button id="start" disabled>Start Game</button>
     </div>
 
-    <!-- GAME -->
     <div class="card game-card hidden">
-
-      <!-- ROLE REVEAL -->
       <div id="roleReveal" class="role-reveal hidden">
         <div class="role-card-inner">
           <div class="role-front"></div>
@@ -61,7 +68,6 @@
 
       <button id="restart" class="hidden">Restart Game</button>
     </div>
-
   </div>
 
   <script src="app.js"></script>
