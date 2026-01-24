@@ -120,90 +120,94 @@ wss.on('connection', ws => {
     }
 
     // --- SUBMIT WORD ---
-if (msg.type === 'submitWord') {
-  if (lobby.players[lobby.turn].id !== player.id) return;
+    if (msg.type === 'submitWord') {
+      if (lobby.players[lobby.turn].id !== player.id) return;
 
-  const entry = { name: player.name, word: msg.word };
-  lobby.phase === 'round1' ? lobby.round1.push(entry) : lobby.round2.push(entry);
+      const entry = { name: player.name, word: msg.word };
+      lobby.phase === 'round1' ? lobby.round1.push(entry) : lobby.round2.push(entry);
 
-  lobby.turn++;
+      lobby.turn++;
 
-  if (lobby.turn >= lobby.players.length) {
-    lobby.turn = 0;
-    
-    if (lobby.phase === 'round1') {
-      lobby.phase = 'round2';
-      // Send final Round 1 state with all words
+      if (lobby.turn >= lobby.players.length) {
+        lobby.turn = 0;
+        
+        if (lobby.phase === 'round1') {
+          lobby.phase = 'round2';
+          // Send final Round 1 state with all words
+          broadcast(lobby, {
+            type: 'turnUpdate',
+            phase: 'round1', // Still round1 phase for this update
+            round1: lobby.round1,
+            round2: lobby.round2,
+            currentPlayer: lobby.players[0].name
+          });
+        } 
+        else if (lobby.phase === 'round2') {
+          lobby.phase = 'voting';
+          // CRITICAL: Send final Round 2 state BEFORE voting
+          broadcast(lobby, {
+            type: 'turnUpdate',
+            phase: 'round2', // Still round2 phase for this update
+            round1: lobby.round1,
+            round2: lobby.round2, // This now includes Player 3's word
+            currentPlayer: 'Voting Phase'
+          });
+          
+          // Then start voting
+          setTimeout(() => {
+            broadcast(lobby, {
+              type: 'startVoting',
+              players: lobby.players.map(p => p.name)
+            });
+          }, 500); // Small delay so players see the final words
+        }
+        return;
+      }
+
+      // Normal turn update (not end of round)
       broadcast(lobby, {
         type: 'turnUpdate',
-        phase: 'round1', // Still round1 phase for this update
+        phase: lobby.phase,
         round1: lobby.round1,
         round2: lobby.round2,
-        currentPlayer: lobby.players[0].name
+        currentPlayer: lobby.players[lobby.turn].name
       });
-    } 
-    else if (lobby.phase === 'round2') {
-      lobby.phase = 'voting';
-      // CRITICAL: Send final Round 2 state BEFORE voting
-      broadcast(lobby, {
-        type: 'turnUpdate',
-        phase: 'round2', // Still round2 phase for this update
-        round1: lobby.round1,
-        round2: lobby.round2, // This now includes Player 3's word
-        currentPlayer: 'Voting Phase'
-      });
-      
-      // Then start voting
-      setTimeout(() => {
-        broadcast(lobby, {
-          type: 'startVoting',
-          players: lobby.players.map(p => p.name)
-        });
-      }, 500); // Small delay so players see the final words
     }
-    return;
-  }
-
-  // Normal turn update (not end of round)
-  broadcast(lobby, {
-    type: 'turnUpdate',
-    phase: lobby.phase,
-    round1: lobby.round1,
-    round2: lobby.round2,
-    currentPlayer: lobby.players[lobby.turn].name
-  });
-}
-
-    // --- VOTE ---
-        // ... (previous code remains unchanged)
 
     // --- VOTE ---
     if (msg.type === 'vote') {
-      if (msg.vote === player.name) return;
+      if (msg.vote === player.name) return; // Can't vote for self
       player.vote = msg.vote;
 
       if (lobby.players.every(p => p.vote)) {
-        // Calculate Winner
+        // Calculate vote counts
         const voteCounts = {};
         lobby.players.forEach(p => {
           voteCounts[p.vote] = (voteCounts[p.vote] || 0) + 1;
         });
 
+        // Find player with most votes
         let ejected = null;
         let maxVotes = 0;
+        let isTie = false;
 
-        // Find player with most votes (if tie, ejected remains null/tie)
         Object.entries(voteCounts).forEach(([name, count]) => {
           if (count > maxVotes) {
             maxVotes = count;
             ejected = name;
-          } else if (count === maxVotes) {
-            ejected = null; // Tie implies no majority ejection
+            isTie = false;
+          } else if (count === maxVotes && name !== ejected) {
+            isTie = true; // Mark as tie (but don't change ejected)
           }
         });
 
+        // If tie, no one is ejected
+        if (isTie) {
+          ejected = null;
+        }
+
         const impostor = lobby.players.find(p => p.role === 'impostor');
-        const winner = (ejected === impostor.name) ? 'Civilians' : 'Impostor';
+        const winner = (ejected === impostor?.name) ? 'Civilians' : 'Impostor';
 
         broadcast(lobby, {
           type: 'gameEnd',
@@ -211,14 +215,11 @@ if (msg.type === 'submitWord') {
           votes: Object.fromEntries(lobby.players.map(p => [p.name, p.vote])),
           secretWord: lobby.word,
           hint: lobby.hint,
-          winner // <--- Send winner
+          winner
         });
         lobby.phase = 'results';
       }
     }
-
-    // ... (rest of file remains unchanged)
-
 
     // --- RESTART ---
     if (msg.type === 'restart') {
@@ -227,5 +228,28 @@ if (msg.type === 'submitWord') {
         startGame(lobby);
       }
     }
+
+    // Handle WebSocket close/cleanup
+    ws.onclose = () => {
+      if (lobby && player) {
+        // Remove player from lobby if they disconnect
+        const index = lobby.players.findIndex(p => p.id === player.id);
+        if (index !== -1) {
+          lobby.players.splice(index, 1);
+          
+          // If lobby becomes empty, remove it
+          if (lobby.players.length === 0) {
+            delete lobbies[lobbyId];
+          } else {
+            // Update remaining players
+            broadcast(lobby, {
+              type: 'lobbyUpdate',
+              players: lobby.players.map(p => p.name),
+              owner: lobby.owner
+            });
+          }
+        }
+      }
+    };
   });
 });
