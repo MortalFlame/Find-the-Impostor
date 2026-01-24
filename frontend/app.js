@@ -36,7 +36,25 @@ if (!playerId) {
 let isSpectator = false;
 let isReconnecting = false;
 let currentLobbyId = null;
-let joinType = 'joinLobby'; // Track how we joined
+let joinType = 'joinLobby';
+
+// Debug mode - set to false for production
+const DEBUG_MODE = false; // CHANGE TO false FOR PRODUCTION
+
+function safeLog(...args) {
+  if (DEBUG_MODE) {
+    console.log(...args);
+  }
+}
+
+function safeError(...args) {
+  if (DEBUG_MODE) {
+    console.error(...args);
+  } else {
+    // In production, only log critical errors
+    console.error('[Game Error] Connection issue - please refresh if problems persist');
+  }
+}
 
 function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -68,7 +86,7 @@ function connect() {
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
-    console.log(`Connecting as ${isSpectator ? 'spectator' : 'player'} to lobby ${lobbyId.value || 'new'}`);
+    safeLog('Game connection established');
     
     if (joinType === 'joinSpectator') {
       ws.send(JSON.stringify({
@@ -89,7 +107,7 @@ function connect() {
 
   ws.onmessage = e => {
     const d = JSON.parse(e.data);
-    console.log('Received message:', d.type, d);
+    safeLog('Game update received:', d.type);
 
     if (d.type === 'error') {
       alert(d.message);
@@ -98,7 +116,6 @@ function connect() {
 
     if (d.type === 'forceSpectator') {
       alert(d.message);
-      // Automatically switch to spectator mode
       isSpectator = true;
       joinType = 'joinSpectator';
       connect();
@@ -123,19 +140,15 @@ function connect() {
       }
       players.innerHTML = playersHtml;
       
-      // Disable start button for non-owners and spectators
       const isOwner = d.owner === playerId;
       start.disabled = isSpectator || d.players.length < 3 || !isOwner;
       
-      // Hide spectate button if already spectating
       spectate.style.display = isSpectator ? 'none' : 'block';
       
-      // Show game phase info
       if (d.phase && d.phase !== 'lobby') {
         players.innerHTML += `<br><br><i>Game in progress: ${d.phase}</i>`;
       }
       
-      // If we're a spectator and game is in lobby/results, show message about joining next game
       if (isSpectator && (d.phase === 'lobby' || d.phase === 'results')) {
         players.innerHTML += `<br><br><i style="color:#9b59b6">Click "Join Lobby" to play next game</i>`;
       }
@@ -145,7 +158,6 @@ function connect() {
       lobbyCard.classList.add('hidden');
       gameCard.classList.remove('hidden');
       
-      // Reset UI for new game
       results.innerHTML = ''; 
       restart.classList.add('hidden');
       restart.style.opacity = '1';
@@ -192,12 +204,10 @@ function connect() {
       } else {
         turnEl.textContent = isSpectator ? `Spectating - Turn: ${d.currentPlayer}` : `Turn: ${d.currentPlayer}`;
         
-        // For spectators, always disable submit
         if (isSpectator) {
           submit.disabled = true;
           input.placeholder = `Spectating - ${d.currentPlayer}'s turn`;
         } else {
-          // For players, check if it's their turn
           const isMyTurn = d.currentPlayer === nickname.value.replace('👁️ ', '');
           submit.disabled = !isMyTurn;
           input.placeholder = isMyTurn ? 'Your word' : `Waiting for ${d.currentPlayer}...`;
@@ -212,11 +222,9 @@ function connect() {
       submit.disabled = true;
       
       if (isSpectator || d.isSpectator) {
-        // Spectators see results but can't vote
         voting.innerHTML = '<h3>Spectating Votes</h3>' +
           d.players.map(p => `<div class="spectator-vote-btn">${p}</div>`).join('');
       } else {
-        // Players can vote
         voting.innerHTML = '<h3>Vote</h3>' +
           d.players
             .filter(p => p !== nickname.value.replace('👁️ ', ''))
@@ -244,7 +252,6 @@ function connect() {
       if (!isSpectator) {
         restart.classList.remove('hidden');
       } else {
-        // Spectators see message about joining next game
         results.innerHTML += `<hr><div style="text-align:center; color:#9b59b6">
           <i>👁️ You are spectating. Click "Join Lobby" in the lobby to play next game.</i>
         </div>`;
@@ -259,31 +266,24 @@ function connect() {
   };
 
   ws.onerror = (error) => {
-    console.error('WebSocket error:', error);
+    safeError('Connection error');
   };
 
   ws.onclose = (event) => {
-    console.log('WebSocket closed:', event.code, event.reason);
+    safeLog('Connection closed');
     
-    // Don't try to reconnect immediately if we're closing normally
     if (event.code === 1000 || event.code === 1001) {
       return;
     }
     
-    // Try to reconnect after a delay
     setTimeout(() => {
-      console.log('Attempting to reconnect...');
       isReconnecting = true;
       
-      // Try to reconnect with the same parameters
       if (isSpectator && currentLobbyId) {
-        // Reconnect as spectator to the same lobby
         joinAsSpectator();
       } else if (currentLobbyId) {
-        // Reconnect as player to the same lobby
         joinAsPlayer();
       } else {
-        // No current lobby, just show the lobby card
         lobbyCard.classList.remove('hidden');
         gameCard.classList.add('hidden');
       }
@@ -291,7 +291,6 @@ function connect() {
   };
 }
 
-// Event listeners
 join.onclick = joinAsPlayer;
 spectate.onclick = joinAsSpectator;
 
@@ -332,7 +331,6 @@ window.vote = (v, btnElement) => {
   }
   ws.send(JSON.stringify({ type: 'vote', vote: v }));
   
-  // Visual feedback for voting
   const buttons = document.querySelectorAll('.vote-btn');
   buttons.forEach(b => {
     if (b === btnElement) {
@@ -346,7 +344,6 @@ window.vote = (v, btnElement) => {
   });
 };
 
-// Enter key support
 nickname.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') joinAsPlayer();
 });
@@ -359,16 +356,11 @@ input.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isSpectator) submit.click();
 });
 
-// Handle page visibility change (tab switching)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // Page is hidden (user switched tabs/minimized)
-    console.log('Page hidden - connection may be affected');
+    safeLog('Page visibility changed');
   } else {
-    // Page is visible again
-    console.log('Page visible - checking connection');
     if (ws && ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING) {
-      // Try to reconnect
       setTimeout(() => {
         if (isSpectator && currentLobbyId) {
           joinAsSpectator();
@@ -380,13 +372,11 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Handle beforeunload (page refresh/close)
 window.addEventListener('beforeunload', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    // Send a close message to the server if possible
     ws.send(JSON.stringify({ type: 'disconnecting' }));
   }
 });
 
-// Initialize
-console.log('Impostor game client initialized. Player ID:', playerId);
+// Initialize without logging player ID
+safeLog('Game client initialized');
