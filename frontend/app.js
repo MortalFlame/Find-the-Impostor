@@ -37,9 +37,17 @@ let isSpectator = false;
 let isReconnecting = false;
 let currentLobbyId = null;
 let joinType = 'joinLobby';
+let connectionAttempts = 0;
+let maxConnectionAttempts = 5;
+let reconnectDelay = 2000; // Start with 2 seconds
+let hasShownConnectionWarning = false;
 
-// Debug mode - set to false for production
-const DEBUG_MODE = false; // CHANGE TO false FOR PRODUCTION
+// Connection quality indicators
+let lastPingTime = 0;
+let connectionLatency = 0;
+let connectionStable = true;
+
+const DEBUG_MODE = false;
 
 function safeLog(...args) {
   if (DEBUG_MODE) {
@@ -50,9 +58,6 @@ function safeLog(...args) {
 function safeError(...args) {
   if (DEBUG_MODE) {
     console.error(...args);
-  } else {
-    // In production, only log critical errors
-    console.error('[Game Error] Connection issue - please refresh if problems persist');
   }
 }
 
@@ -60,19 +65,68 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+function showConnectionWarning(message) {
+  if (hasShownConnectionWarning) return;
+  
+  const warning = document.createElement('div');
+  warning.style.cssText = `
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #e74c3c;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 1000;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    animation: fadeIn 0.3s;
+  `;
+  warning.textContent = message;
+  document.body.appendChild(warning);
+  
+  hasShownConnectionWarning = true;
+  setTimeout(() => {
+    if (warning.parentNode) {
+      warning.style.opacity = '0';
+      warning.style.transition = 'opacity 0.5s';
+      setTimeout(() => {
+        if (warning.parentNode) {
+          warning.parentNode.removeChild(warning);
+        }
+      }, 500);
+    }
+  }, 5000);
+}
+
 function joinAsPlayer() {
+  if (isReconnecting) return;
   isSpectator = false;
   joinType = 'joinLobby';
+  connectionAttempts = 0;
+  reconnectDelay = 2000;
   connect();
 }
 
 function joinAsSpectator() {
+  if (isReconnecting) return;
   isSpectator = true;
   joinType = 'joinSpectator';
+  connectionAttempts = 0;
+  reconnectDelay = 2000;
   connect();
 }
 
 function connect() {
+  if (isReconnecting && connectionAttempts >= maxConnectionAttempts) {
+    safeLog('Max reconnection attempts reached');
+    showConnectionWarning('Connection failed. Please refresh the page.');
+    lobbyCard.classList.remove('hidden');
+    gameCard.classList.add('hidden');
+    isReconnecting = false;
+    return;
+  }
+
   if (!nickname.value.trim()) {
     alert('Please enter a nickname');
     return;
@@ -83,220 +137,260 @@ function connect() {
     return;
   }
 
-  ws = new WebSocket(wsUrl);
-
-  ws.onopen = () => {
-    safeLog('Game connection established');
+  try {
+    ws = new WebSocket(wsUrl);
+    connectionAttempts++;
     
-    if (joinType === 'joinSpectator') {
-      ws.send(JSON.stringify({
-        type: 'joinSpectator',
-        name: nickname.value.trim(),
-        lobbyId: lobbyId.value.trim(),
-        playerId
-      }));
-    } else {
-      ws.send(JSON.stringify({
-        type: 'joinLobby',
-        name: nickname.value.trim(),
-        lobbyId: lobbyId.value || undefined,
-        playerId
-      }));
-    }
-  };
-
-  ws.onmessage = e => {
-    const d = JSON.parse(e.data);
-    safeLog('Game update received:', d.type);
-
-    if (d.type === 'error') {
-      alert(d.message);
-      return;
-    }
-
-    if (d.type === 'forceSpectator') {
-      alert(d.message);
-      isSpectator = true;
-      joinType = 'joinSpectator';
-      connect();
-      return;
-    }
-
-    if (d.type === 'lobbyAssigned') {
-      lobbyId.value = d.lobbyId;
-      currentLobbyId = d.lobbyId;
-      isSpectator = d.isSpectator || false;
+    ws.onopen = () => {
+      safeLog('Game connection established');
+      connectionAttempts = 0;
+      reconnectDelay = 2000;
+      isReconnecting = false;
+      hasShownConnectionWarning = false;
       
-      if (isSpectator) {
-        nickname.value = nickname.value.startsWith('👁️ ') ? nickname.value : `👁️ ${nickname.value.trim()}`;
-        nickname.disabled = true;
-      }
-    }
-
-    if (d.type === 'lobbyUpdate') {
-      let playersHtml = '<b>Players:</b><br>' + d.players.join('<br>');
-      if (d.spectators && d.spectators.length > 0) {
-        playersHtml += '<br><br><b>Spectators:</b><br>' + d.spectators.join('<br>');
-      }
-      players.innerHTML = playersHtml;
-      
-      const isOwner = d.owner === playerId;
-      start.disabled = isSpectator || d.players.length < 3 || !isOwner;
-      
-      spectate.style.display = isSpectator ? 'none' : 'block';
-      
-      if (d.phase && d.phase !== 'lobby') {
-        players.innerHTML += `<br><br><i>Game in progress: ${d.phase}</i>`;
-      }
-      
-      if (isSpectator && (d.phase === 'lobby' || d.phase === 'results')) {
-        players.innerHTML += `<br><br><i style="color:#9b59b6">Click "Join Lobby" to play next game</i>`;
-      }
-    }
-
-    if (d.type === 'gameStart') {
-      lobbyCard.classList.add('hidden');
-      gameCard.classList.remove('hidden');
-      
-      results.innerHTML = ''; 
-      restart.classList.add('hidden');
-      restart.style.opacity = '1';
-      restart.innerText = 'Restart Game';
-      
-      input.value = '';
-      
-      if (isSpectator || d.role === 'spectator') {
-        input.placeholder = 'Spectator Mode - Watching Only';
-        input.disabled = true;
-        submit.disabled = true;
-      } else {
-        input.placeholder = 'Your word';
-        input.disabled = false;
-        submit.disabled = false;
-      }
-
-      roleReveal.classList.remove('hidden');
-      
-      if (d.role === 'spectator') {
-        roleBack.className = 'role-back spectator';
-        roleText.innerHTML = '<span style="color:#9b59b6">👁️ Spectator</span>';
-        wordEl.textContent = 'Watching Game';
-      } else if (d.role === 'civilian') {
-        roleBack.className = `role-back ${d.role}`;
-        roleText.innerHTML = '<span style="color:#2ecc71">Civilian</span>';
-        wordEl.textContent = capitalize(d.word);
-      } else if (d.role === 'impostor') {
-        roleBack.className = `role-back ${d.role}`;
-        roleText.innerHTML = '<span style="color:#e74c3c">Impostor</span>';
-        wordEl.textContent = capitalize(d.word);
-      }
-    }
-
-    if (d.type === 'turnUpdate') {
-      round1El.innerHTML = d.round1.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
-      round2El.innerHTML = d.round2.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
-      
-      if (d.currentPlayer === 'Voting Phase') {
-        turnEl.textContent = isSpectator ? 'Spectating - Voting Starting...' : 'Round Complete - Voting Starting...';
-        submit.disabled = true;
-        input.value = '';
-        input.placeholder = isSpectator ? 'Spectating voting...' : 'Get ready to vote...';
-      } else {
-        turnEl.textContent = isSpectator ? `Spectating - Turn: ${d.currentPlayer}` : `Turn: ${d.currentPlayer}`;
-        
-        if (isSpectator) {
-          submit.disabled = true;
-          input.placeholder = `Spectating - ${d.currentPlayer}'s turn`;
-        } else {
-          const isMyTurn = d.currentPlayer === nickname.value.replace('👁️ ', '');
-          submit.disabled = !isMyTurn;
-          input.placeholder = isMyTurn ? 'Your word' : `Waiting for ${d.currentPlayer}...`;
+      // Start ping interval
+      if (window.pingInterval) clearInterval(window.pingInterval);
+      window.pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          lastPingTime = Date.now();
+          try {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          } catch (err) {
+            safeError('Failed to send ping');
+          }
         }
-      }
-    }
-
-    if (d.type === 'startVoting') {
-      turnEl.textContent = isSpectator ? 'Spectating - Vote for the Impostor!' : 'Vote for the Impostor!';
-      input.value = '';
-      input.placeholder = isSpectator ? 'Spectating votes...' : 'Voting in progress...';
-      submit.disabled = true;
+      }, 25000); // Ping every 25 seconds
       
-      if (isSpectator || d.isSpectator) {
-        voting.innerHTML = '<h3>Spectating Votes</h3>' +
-          d.players.map(p => `<div class="spectator-vote-btn">${p}</div>`).join('');
+      if (joinType === 'joinSpectator') {
+        ws.send(JSON.stringify({
+          type: 'joinSpectator',
+          name: nickname.value.trim(),
+          lobbyId: lobbyId.value.trim(),
+          playerId
+        }));
       } else {
-        voting.innerHTML = '<h3>Vote</h3>' +
-          d.players
-            .filter(p => p !== nickname.value.replace('👁️ ', ''))
-            .map(p => `<button class="vote-btn" onclick="vote('${p}', this)">${p}</button>`)
-            .join('');
+        ws.send(JSON.stringify({
+          type: 'joinLobby',
+          name: nickname.value.trim(),
+          lobbyId: lobbyId.value || undefined,
+          playerId
+        }));
       }
-    }
+    };
 
-    if (d.type === 'gameEnd') {
-      const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
-      
-      results.innerHTML =
-        `<h2 style="color:${winnerColor}; text-align:center">${d.winner} Won!</h2>` +
-        `<div><b>Word:</b> ${capitalize(d.secretWord)}</div>` +
-        `<div><b>Hint:</b> ${capitalize(d.hint)}</div><hr>` +
-        d.roles.map(r =>
-          `<div style="color:${r.role==='civilian'?'#2ecc71':'#e74c3c'}">
-             ${r.name}: ${r.role.charAt(0).toUpperCase() + r.role.slice(1)}
-           </div>`).join('') +
-        '<hr><b>Votes</b><br>' +
-        Object.entries(d.votes).map(([k,v]) => `${k} → ${v}`).join('<br>');
+    ws.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        safeLog('Game update received:', d.type);
 
-      voting.innerHTML = '';
+        if (d.type === 'pong') {
+          connectionLatency = Date.now() - lastPingTime;
+          connectionStable = connectionLatency < 1000; // Less than 1 second
+          return;
+        }
+
+        if (d.type === 'error') {
+          // Don't show alert for reconnection errors
+          if (!isReconnecting) {
+            alert(d.message);
+          }
+          return;
+        }
+
+        if (d.type === 'lobbyAssigned') {
+          lobbyId.value = d.lobbyId;
+          currentLobbyId = d.lobbyId;
+          isSpectator = d.isSpectator || false;
+          
+          if (isSpectator) {
+            nickname.value = nickname.value.startsWith('👁️ ') ? nickname.value : `👁️ ${nickname.value.trim()}`;
+            nickname.disabled = true;
+          }
+        }
+
+        if (d.type === 'lobbyUpdate') {
+          let playersHtml = '<b>Players:</b><br>' + d.players.join('<br>');
+          if (d.spectators && d.spectators.length > 0) {
+            playersHtml += '<br><br><b>Spectators:</b><br>' + d.spectators.join('<br>');
+          }
+          players.innerHTML = playersHtml;
+          
+          const isOwner = d.owner === playerId;
+          start.disabled = isSpectator || d.players.length < 3 || !isOwner;
+          
+          spectate.style.display = isSpectator ? 'none' : 'block';
+          
+          if (d.phase && d.phase !== 'lobby') {
+            players.innerHTML += `<br><br><i>Game in progress: ${d.phase}</i>`;
+          }
+          
+          if (isSpectator && (d.phase === 'lobby' || d.phase === 'results')) {
+            players.innerHTML += `<br><br><i style="color:#9b59b6">Click "Join Lobby" to play next game</i>`;
+          }
+        }
+
+        if (d.type === 'gameStart') {
+          lobbyCard.classList.add('hidden');
+          gameCard.classList.remove('hidden');
+          
+          results.innerHTML = ''; 
+          restart.classList.add('hidden');
+          restart.style.opacity = '1';
+          restart.innerText = 'Restart Game';
+          
+          input.value = '';
+          
+          if (isSpectator || d.role === 'spectator') {
+            input.placeholder = 'Spectator Mode - Watching Only';
+            input.disabled = true;
+            submit.disabled = true;
+          } else {
+            input.placeholder = 'Your word';
+            input.disabled = false;
+            submit.disabled = false;
+          }
+
+          roleReveal.classList.remove('hidden');
+          
+          if (d.role === 'spectator') {
+            roleBack.className = 'role-back spectator';
+            roleText.innerHTML = '<span style="color:#9b59b6">👁️ Spectator</span>';
+            wordEl.textContent = 'Watching Game';
+          } else if (d.role === 'civilian') {
+            roleBack.className = `role-back ${d.role}`;
+            roleText.innerHTML = '<span style="color:#2ecc71">Civilian</span>';
+            wordEl.textContent = capitalize(d.word);
+          } else if (d.role === 'impostor') {
+            roleBack.className = `role-back ${d.role}`;
+            roleText.innerHTML = '<span style="color:#e74c3c">Impostor</span>';
+            wordEl.textContent = capitalize(d.word);
+          }
+        }
+
+        if (d.type === 'turnUpdate') {
+          round1El.innerHTML = d.round1.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
+          round2El.innerHTML = d.round2.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
+          
+          if (d.currentPlayer === 'Voting Phase') {
+            turnEl.textContent = isSpectator ? 'Spectating - Voting Starting...' : 'Round Complete - Voting Starting...';
+            submit.disabled = true;
+            input.value = '';
+            input.placeholder = isSpectator ? 'Spectating voting...' : 'Get ready to vote...';
+          } else {
+            turnEl.textContent = isSpectator ? `Spectating - Turn: ${d.currentPlayer}` : `Turn: ${d.currentPlayer}`;
+            
+            if (isSpectator) {
+              submit.disabled = true;
+              input.placeholder = `Spectating - ${d.currentPlayer}'s turn`;
+            } else {
+              const isMyTurn = d.currentPlayer === nickname.value.replace('👁️ ', '');
+              submit.disabled = !isMyTurn;
+              input.placeholder = isMyTurn ? 'Your word' : `Waiting for ${d.currentPlayer}...`;
+            }
+          }
+        }
+
+        if (d.type === 'startVoting') {
+          turnEl.textContent = isSpectator ? 'Spectating - Vote for the Impostor!' : 'Vote for the Impostor!';
+          input.value = '';
+          input.placeholder = isSpectator ? 'Spectating votes...' : 'Voting in progress...';
+          submit.disabled = true;
+          
+          if (isSpectator || d.isSpectator) {
+            voting.innerHTML = '<h3>Spectating Votes</h3>' +
+              d.players.map(p => `<div class="spectator-vote-btn">${p}</div>`).join('');
+          } else {
+            voting.innerHTML = '<h3>Vote</h3>' +
+              d.players
+                .filter(p => p !== nickname.value.replace('👁️ ', ''))
+                .map(p => `<button class="vote-btn" onclick="vote('${p}', this)">${p}</button>`)
+                .join('');
+          }
+        }
+
+        if (d.type === 'gameEnd') {
+          const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
+          
+          results.innerHTML =
+            `<h2 style="color:${winnerColor}; text-align:center">${d.winner} Won!</h2>` +
+            `<div><b>Word:</b> ${capitalize(d.secretWord)}</div>` +
+            `<div><b>Hint:</b> ${capitalize(d.hint)}</div><hr>` +
+            d.roles.map(r =>
+              `<div style="color:${r.role==='civilian'?'#2ecc71':'#e74c3c'}">
+                ${r.name}: ${r.role.charAt(0).toUpperCase() + r.role.slice(1)}
+              </div>`).join('') +
+            '<hr><b>Votes</b><br>' +
+            Object.entries(d.votes).map(([k,v]) => `${k} → ${v}`).join('<br>');
+
+          voting.innerHTML = '';
+          
+          if (!isSpectator) {
+            restart.classList.remove('hidden');
+          } else {
+            results.innerHTML += `<hr><div style="text-align:center; color:#9b59b6">
+              <i>👁️ You are spectating. Click "Join Lobby" in the lobby to play next game.</i>
+            </div>`;
+          }
+          
+          turnEl.textContent = isSpectator ? 'Spectating - Game Over' : 'Game Over - Results';
+        }
+
+        if (d.type === 'restartUpdate') {
+          restart.innerText = `Waiting for others... (${d.readyCount}/${d.totalPlayers})`;
+        }
+      } catch (error) {
+        safeError('Error processing message:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      safeError('Connection error');
+    };
+
+    ws.onclose = (event) => {
+      safeLog(`Connection closed (code: ${event.code}, reason: ${event.reason})`);
       
-      if (!isSpectator) {
-        restart.classList.remove('hidden');
-      } else {
-        results.innerHTML += `<hr><div style="text-align:center; color:#9b59b6">
-          <i>👁️ You are spectating. Click "Join Lobby" in the lobby to play next game.</i>
-        </div>`;
+      if (window.pingInterval) {
+        clearInterval(window.pingInterval);
       }
       
-      turnEl.textContent = isSpectator ? 'Spectating - Game Over' : 'Game Over - Results';
-    }
-
-    if (d.type === 'restartUpdate') {
-      restart.innerText = `Waiting for others... (${d.readyCount}/${d.totalPlayers})`;
-    }
-  };
-
-  ws.onerror = (error) => {
-    safeError('Connection error');
-  };
-
-  ws.onclose = (event) => {
-    safeLog('Connection closed');
-    
-    if (event.code === 1000 || event.code === 1001) {
-      return;
-    }
-    
-    setTimeout(() => {
+      // Don't reconnect for normal closures
+      if (event.code === 1000 || event.code === 1001) {
+        return;
+      }
+      
+      // Show warning if we were in a game
+      if (gameCard && !gameCard.classList.contains('hidden')) {
+        showConnectionWarning('Connection lost. Reconnecting...');
+      }
+      
+      // Exponential backoff for reconnection
       isReconnecting = true;
-      
-      if (isSpectator && currentLobbyId) {
-        joinAsSpectator();
-      } else if (currentLobbyId) {
-        joinAsPlayer();
-      } else {
-        lobbyCard.classList.remove('hidden');
-        gameCard.classList.add('hidden');
-      }
-    }, 2000);
-  };
+      setTimeout(() => {
+        if (isSpectator && currentLobbyId) {
+          joinAsSpectator();
+        } else if (currentLobbyId) {
+          joinAsPlayer();
+        } else {
+          lobbyCard.classList.remove('hidden');
+          gameCard.classList.add('hidden');
+        }
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // Max 30 seconds delay
+      }, reconnectDelay);
+    };
+  } catch (error) {
+    safeError('Failed to create WebSocket:', error);
+    setTimeout(() => connect(), reconnectDelay);
+  }
 }
 
+// Event listeners
 join.onclick = joinAsPlayer;
 spectate.onclick = joinAsSpectator;
 
 start.onclick = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    alert('Connection lost. Please rejoin the lobby.');
+    showConnectionWarning('Connection lost. Please wait for reconnection...');
     return;
   }
   ws.send(JSON.stringify({ type: 'startGame' }));
@@ -305,7 +399,7 @@ start.onclick = () => {
 submit.onclick = () => {
   if (!input.value.trim() || isSpectator) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    alert('Connection lost. Please rejoin the lobby.');
+    showConnectionWarning('Connection lost. Please wait for reconnection...');
     return;
   }
   ws.send(JSON.stringify({ type: 'submitWord', word: input.value.trim() }));
@@ -315,7 +409,7 @@ submit.onclick = () => {
 restart.onclick = () => {
   if (isSpectator) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    alert('Connection lost. Please rejoin the lobby.');
+    showConnectionWarning('Connection lost. Please wait for reconnection...');
     return;
   }
   ws.send(JSON.stringify({ type: 'restart' }));
@@ -326,7 +420,7 @@ restart.onclick = () => {
 window.vote = (v, btnElement) => {
   if (isSpectator) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    alert('Connection lost. Please rejoin the lobby.');
+    showConnectionWarning('Connection lost. Please wait for reconnection...');
     return;
   }
   ws.send(JSON.stringify({ type: 'vote', vote: v }));
@@ -344,6 +438,7 @@ window.vote = (v, btnElement) => {
   });
 };
 
+// Enter key support
 nickname.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') joinAsPlayer();
 });
@@ -356,27 +451,44 @@ input.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isSpectator) submit.click();
 });
 
+// Enhanced page visibility handling
+let hiddenTime = null;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    safeLog('Page visibility changed');
+    // Page is hidden (user switched tabs/minimized)
+    hiddenTime = Date.now();
+    safeLog('Page hidden - connection may be suspended');
   } else {
-    if (ws && ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING) {
-      setTimeout(() => {
-        if (isSpectator && currentLobbyId) {
-          joinAsSpectator();
-        } else if (currentLobbyId) {
-          joinAsPlayer();
-        }
-      }, 1000);
+    // Page is visible again
+    const hiddenDuration = hiddenTime ? Date.now() - hiddenTime : 0;
+    safeLog(`Page visible after ${hiddenDuration}ms`);
+    
+    // If page was hidden for a while, check connection
+    if (hiddenDuration > 5000) {
+      if (ws && ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING) {
+        safeLog('Reconnecting after page visibility change');
+        setTimeout(() => {
+          if (isSpectator && currentLobbyId) {
+            joinAsSpectator();
+          } else if (currentLobbyId) {
+            joinAsPlayer();
+          }
+        }, 1000);
+      }
     }
   }
 });
 
+// Handle beforeunload (page refresh/close)
 window.addEventListener('beforeunload', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'disconnecting' }));
+    try {
+      ws.send(JSON.stringify({ type: 'disconnecting' }));
+    } catch (err) {
+      // Connection already closing
+    }
   }
 });
 
-// Initialize without logging player ID
+// Initialize
 safeLog('Game client initialized');
