@@ -6,7 +6,7 @@ const lobbyId = document.getElementById('lobbyId');
 const join = document.getElementById('join');
 const spectate = document.getElementById('spectate');
 const start = document.getElementById('start');
-const exitLobbyBtn = document.getElementById('exitLobby'); // NEW: Exit button
+const exitLobbyBtn = document.getElementById('exitLobby');
 const players = document.getElementById('players');
 
 const gameHeader = document.getElementById('gameHeader');
@@ -23,6 +23,9 @@ const wordEl = document.getElementById('word');
 const round1El = document.getElementById('round1');
 const round2El = document.getElementById('round2');
 const turnEl = document.getElementById('turn');
+const turnTimerEl = document.getElementById('turnTimer'); // NEW: Timer element
+const timerProgress = turnTimerEl.querySelector('.timer-progress'); // NEW: Timer progress circle
+const timerText = turnTimerEl.querySelector('.timer-text'); // NEW: Timer text
 const input = document.getElementById('input');
 const submit = document.getElementById('submit');
 const voting = document.getElementById('voting');
@@ -40,10 +43,12 @@ let isReconnecting = false;
 let currentLobbyId = null;
 let joinType = 'joinLobby';
 let connectionAttempts = 0;
-let maxConnectionAttempts = 10; // Increased for spectators
+let maxConnectionAttempts = 15;
 let reconnectDelay = 2000;
 let hasShownConnectionWarning = false;
-let hasClickedRestart = false; // Track if player clicked restart
+let hasClickedRestart = false;
+let turnTimer = null;
+let currentTurnTime = 30; // Store current time for color transitions
 
 let lastPingTime = 0;
 let connectionLatency = 0;
@@ -127,7 +132,81 @@ function showConnectionWarning(message) {
   }, 5000);
 }
 
-// Compact player list with grid layout
+// NEW: Update timer color based on remaining time
+function updateTimerColor(timeLeft) {
+  // Remove all color classes
+  timerProgress.classList.remove('green', 'yellow', 'orange', 'red');
+  
+  // Add appropriate color class
+  if (timeLeft > 20) {
+    timerProgress.classList.add('green');
+  } else if (timeLeft > 15) {
+    timerProgress.classList.add('yellow');
+  } else if (timeLeft > 5) {
+    timerProgress.classList.add('orange');
+  } else {
+    timerProgress.classList.add('red');
+  }
+}
+
+// NEW: Start client-side turn timer with circular progress
+function startTurnTimer(seconds) {
+  if (turnTimer) clearInterval(turnTimer);
+  
+  let timeLeft = seconds;
+  currentTurnTime = seconds;
+  
+  // Show timer
+  turnTimerEl.classList.remove('hidden');
+  
+  // Calculate circumference (2 * π * r) where r = 45
+  const circumference = 2 * Math.PI * 45;
+  
+  // Initial update
+  updateTimerDisplay(timeLeft, circumference);
+  
+  turnTimer = setInterval(() => {
+    timeLeft--;
+    
+    if (timeLeft <= 0) {
+      clearInterval(turnTimer);
+      turnTimer = null;
+      turnTimerEl.classList.add('hidden');
+      if (!isSpectator && submit.disabled === false) {
+        // Your turn but timer expired
+        turnEl.textContent = 'Time expired! Waiting for next player...';
+      }
+    } else {
+      updateTimerDisplay(timeLeft, circumference);
+    }
+  }, 1000);
+}
+
+// NEW: Update timer display
+function updateTimerDisplay(timeLeft, circumference) {
+  // Update text
+  timerText.textContent = timeLeft;
+  
+  // Update color
+  updateTimerColor(timeLeft);
+  
+  // Calculate progress (0 to 100%)
+  const progress = (timeLeft / currentTurnTime) * 100;
+  
+  // Calculate stroke dash offset
+  const offset = circumference - (progress / 100) * circumference;
+  timerProgress.style.strokeDashoffset = offset;
+}
+
+// NEW: Stop timer
+function stopTurnTimer() {
+  if (turnTimer) {
+    clearInterval(turnTimer);
+    turnTimer = null;
+  }
+  turnTimerEl.classList.add('hidden');
+}
+
 function updatePlayerList(playersData, spectatorsData = []) {
   let playersHtml = '';
   
@@ -138,7 +217,6 @@ function updatePlayerList(playersData, spectatorsData = []) {
     playersData.forEach(player => {
       const isConnected = player.connected !== false;
       const statusClass = isConnected ? 'player-connected' : 'player-disconnected';
-      const statusSymbol = isConnected ? '●' : '○';
       
       playersHtml += `
         <div class="player-item">
@@ -175,28 +253,47 @@ function updatePlayerList(playersData, spectatorsData = []) {
   players.innerHTML = playersHtml;
 }
 
-// NEW: Exit lobby function
+// Exit lobby function
 function exitLobby() {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'exitLobby' }));
+    try {
+      ws.send(JSON.stringify({ type: 'exitLobby' }));
+    } catch (err) {
+      // Ignore send errors
+    }
+    
+    try {
+      ws.close(1000, 'User exited lobby');
+    } catch (err) {
+      // Ignore close errors
+    }
   }
   
-  // Reset UI to initial state
+  resetToLobbyScreen();
+  safeLog('Exited lobby');
+}
+
+function resetToLobbyScreen() {
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
   gameHeader.classList.add('hidden');
   
-  // Reset inputs
-  nickname.value = '';
+  nickname.value = nickname.value.replace('👁️ ', '');
   nickname.disabled = false;
   lobbyId.value = '';
   
-  // Reset state
   isSpectator = false;
   currentLobbyId = null;
+  isReconnecting = false;
+  connectionAttempts = 0;
   updateConnectionStatus('disconnected');
   
-  safeLog('Exited lobby');
+  stopTurnTimer();
+  
+  if (window.pingInterval) {
+    clearInterval(window.pingInterval);
+    window.pingInterval = null;
+  }
 }
 
 function joinAsPlayer() {
@@ -221,11 +318,7 @@ function connect() {
   if (isReconnecting && connectionAttempts >= maxConnectionAttempts) {
     safeLog('Max reconnection attempts reached');
     showConnectionWarning('Connection failed. Please refresh the page.');
-    lobbyCard.classList.remove('hidden');
-    gameCard.classList.add('hidden');
-    gameHeader.classList.add('hidden');
-    isReconnecting = false;
-    updateConnectionStatus('disconnected', 'Connection failed');
+    resetToLobbyScreen();
     return;
   }
 
@@ -241,6 +334,15 @@ function connect() {
 
   try {
     updateConnectionStatus('connecting', 'Connecting to server...');
+    
+    if (ws && ws.readyState !== WebSocket.CLOSED) {
+      try {
+        ws.close(1000, 'Reconnecting');
+      } catch (err) {
+        // Ignore
+      }
+    }
+    
     ws = new WebSocket(wsUrl);
     connectionAttempts++;
     
@@ -306,15 +408,9 @@ function connect() {
           return;
         }
 
-        // NEW: Handle lobby exit confirmation
         if (d.type === 'lobbyExited') {
           safeLog('Successfully exited lobby:', d.message);
-          lobbyCard.classList.remove('hidden');
-          gameCard.classList.add('hidden');
-          gameHeader.classList.add('hidden');
-          isSpectator = false;
-          currentLobbyId = null;
-          updateConnectionStatus('disconnected');
+          resetToLobbyScreen();
           return;
         }
 
@@ -337,11 +433,9 @@ function connect() {
           const isOwner = d.owner === playerId;
           start.disabled = isSpectator || d.players.length < 3 || !isOwner;
           
-          // Show/hide buttons based on spectator status
           spectate.style.display = isSpectator ? 'none' : 'block';
           join.style.display = isSpectator ? 'none' : 'block';
           
-          // Show exit button when in lobby
           exitLobbyBtn.style.display = 'block';
           
           if (d.phase && d.phase !== 'lobby') {
@@ -357,10 +451,8 @@ function connect() {
           lobbyCard.classList.add('hidden');
           gameCard.classList.remove('hidden');
           
-          // Hide exit button during game
           exitLobbyBtn.style.display = 'none';
           
-          // Reset restart state
           hasClickedRestart = false;
           
           results.innerHTML = ''; 
@@ -402,26 +494,35 @@ function connect() {
           round1El.innerHTML = d.round1.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
           round2El.innerHTML = d.round2.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
           
+          stopTurnTimer();
+          
           if (d.currentPlayer === 'Voting Phase') {
             turnEl.textContent = isSpectator ? 'Spectating - Voting Starting...' : 'Round Complete - Voting Starting...';
             submit.disabled = true;
             input.value = '';
             input.placeholder = isSpectator ? 'Spectating voting...' : 'Get ready to vote...';
           } else {
-            turnEl.textContent = isSpectator ? `Spectating - Turn: ${d.currentPlayer}` : `Turn: ${d.currentPlayer}`;
+            const isMyTurn = d.currentPlayer === nickname.value.replace('👁️ ', '');
             
             if (isSpectator) {
+              turnEl.textContent = `Spectating - Turn: ${d.currentPlayer}`;
               submit.disabled = true;
               input.placeholder = `Spectating - ${d.currentPlayer}'s turn`;
             } else {
-              const isMyTurn = d.currentPlayer === nickname.value.replace('👁️ ', '');
+              turnEl.textContent = isMyTurn ? `Your Turn: ${d.currentPlayer}` : `Turn: ${d.currentPlayer}`;
               submit.disabled = !isMyTurn;
-              input.placeholder = isMyTurn ? 'Your word' : `Waiting for ${d.currentPlayer}...`;
+              input.placeholder = isMyTurn ? 'Your word (30s)' : `Waiting for ${d.currentPlayer}...`;
+              
+              if (isMyTurn && d.timeRemaining) {
+                startTurnTimer(d.timeRemaining);
+              }
             }
           }
         }
 
         if (d.type === 'startVoting') {
+          stopTurnTimer();
+          
           turnEl.textContent = isSpectator ? 'Spectating - Vote for the Impostor!' : 'Vote for the Impostor!';
           input.value = '';
           input.placeholder = isSpectator ? 'Spectating votes...' : 'Voting in progress...';
@@ -439,19 +540,63 @@ function connect() {
           }
         }
 
-        if (d.type === 'gameEnd') {
-          const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
+        // NEW: Handle game end due to player count or impostor leaving
+        if (d.type === 'gameEndEarly') {
+          stopTurnTimer();
           
-          // IMPROVED RESULTS FORMATTING: Color civilians green, impostor red
+          const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
+          let reasonText = '';
+          
+          if (d.reason === 'not_enough_players') {
+            reasonText = `<div style="color:#f39c12; text-align:center; margin-bottom:10px;">
+              <i>Game ended: Not enough players (minimum 3 required)</i>
+            </div>`;
+          } else if (d.reason === 'impostor_left') {
+            reasonText = `<div style="color:#f39c12; text-align:center; margin-bottom:10px;">
+              <i>Game ended: Impostor left the game</i>
+            </div>`;
+          }
+          
           const rolesHtml = d.roles.map(r => {
             const roleColor = r.role === 'civilian' ? '#2ecc71' : '#e74c3c';
             const roleName = r.role.charAt(0).toUpperCase() + r.role.slice(1);
             return `<div style="color:${roleColor}">${r.name}: ${roleName}</div>`;
           }).join('');
           
-          // IMPROVED VOTE FORMATTING: "X voted Y" instead of "X -> Y"
+          results.innerHTML =
+            `<h2 style="color:${winnerColor}; text-align:center">${d.winner} Won!</h2>` +
+            reasonText +
+            `<div><b>Word:</b> ${capitalize(d.secretWord)}</div>` +
+            `<div><b>Hint:</b> ${capitalize(d.hint)}</div><hr>` +
+            '<b>Roles</b><br>' + rolesHtml;
+
+          voting.innerHTML = '';
+          
+          exitLobbyBtn.style.display = 'block';
+          
+          if (!isSpectator) {
+            restart.classList.remove('hidden');
+            restart.innerText = 'Restart Game';
+            restart.disabled = false;
+            restart.style.opacity = '1';
+            hasClickedRestart = false;
+          }
+          
+          turnEl.textContent = 'Game Ended Early';
+        }
+
+        if (d.type === 'gameEnd') {
+          stopTurnTimer();
+          
+          const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
+          
+          const rolesHtml = d.roles.map(r => {
+            const roleColor = r.role === 'civilian' ? '#2ecc71' : '#e74c3c';
+            const roleName = r.role.charAt(0).toUpperCase() + r.role.slice(1);
+            return `<div style="color:${roleColor}">${r.name}: ${roleName}</div>`;
+          }).join('');
+          
           const votesHtml = Object.entries(d.votes).map(([voter, votedFor]) => {
-            // Find colors for voter and votedFor based on their roles
             const voterRole = d.roles.find(r => r.name === voter)?.role;
             const votedForRole = d.roles.find(r => r.name === votedFor)?.role;
             
@@ -470,7 +615,6 @@ function connect() {
 
           voting.innerHTML = '';
           
-          // Show exit button again on results screen
           exitLobbyBtn.style.display = 'block';
           
           if (!isSpectator) {
@@ -478,7 +622,7 @@ function connect() {
             restart.innerText = 'Restart Game';
             restart.disabled = false;
             restart.style.opacity = '1';
-            hasClickedRestart = false; // Reset for next game
+            hasClickedRestart = false;
           } else {
             results.innerHTML += `<hr><div style="text-align:center; color:#9b59b6">
               <i>👁️ You are spectating. Click "Join Lobby" to play next game.</i>
@@ -489,13 +633,11 @@ function connect() {
         }
 
         if (d.type === 'restartUpdate') {
-          // Only update if this player has already clicked restart
           if (hasClickedRestart) {
             restart.innerText = `Waiting for others... (${d.readyCount}/${d.totalPlayers})`;
             restart.disabled = true;
             restart.style.opacity = '0.7';
           } else {
-            // Player hasn't clicked yet, keep showing "Restart Game"
             restart.innerText = 'Restart Game';
             restart.disabled = false;
             restart.style.opacity = '1';
@@ -516,14 +658,16 @@ function connect() {
       
       if (window.pingInterval) {
         clearInterval(window.pingInterval);
+        window.pingInterval = null;
       }
+      
+      stopTurnTimer();
       
       if (event.code === 1000 || event.code === 1001) {
         updateConnectionStatus('disconnected', 'Disconnected');
         return;
       }
       
-      // If we're in a game and get disconnected, try to reconnect
       if (gameCard && !gameCard.classList.contains('hidden')) {
         showConnectionWarning('Connection lost. Reconnecting...');
         updateConnectionStatus('connecting', 'Reconnecting...');
@@ -538,9 +682,7 @@ function connect() {
         } else if (currentLobbyId) {
           joinAsPlayer();
         } else {
-          lobbyCard.classList.remove('hidden');
-          gameCard.classList.add('hidden');
-          gameHeader.classList.add('hidden');
+          resetToLobbyScreen();
         }
         reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
       }, reconnectDelay);
@@ -554,7 +696,7 @@ function connect() {
 
 join.onclick = joinAsPlayer;
 spectate.onclick = joinAsSpectator;
-exitLobbyBtn.onclick = exitLobby; // NEW: Exit button handler
+exitLobbyBtn.onclick = exitLobby;
 
 start.onclick = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -581,7 +723,6 @@ restart.onclick = () => {
     return;
   }
   
-  // Mark that this player has clicked restart
   hasClickedRestart = true;
   ws.send(JSON.stringify({ type: 'restart' }));
   restart.innerText = 'Waiting for others...';
@@ -625,15 +766,13 @@ input.addEventListener('keypress', (e) => {
 let hiddenTime = null;
 let pageHidden = false;
 
-// Enhanced page visibility handling for spectators
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     pageHidden = true;
     hiddenTime = Date.now();
     safeLog('Page hidden - connection may be suspended');
     
-    // If we're a spectator, send a ping to keep connection alive
-    if (isSpectator && ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
       } catch (err) {
@@ -649,22 +788,11 @@ document.addEventListener('visibilitychange', () => {
     const hiddenDuration = hiddenTime ? Date.now() - hiddenTime : 0;
     safeLog(`Page visible after ${hiddenDuration}ms`);
     
-    // If page was hidden for a while, force reconnection for spectators
-    if (hiddenDuration > 3000) {
-      if (ws && (ws.readyState !== WebSocket.OPEN || isSpectator)) {
+    if (hiddenDuration > 5000) {
+      if (ws && ws.readyState !== WebSocket.OPEN) {
         safeLog('Reconnecting after page visibility change');
         updateConnectionStatus('connecting', 'Reconnecting...');
         
-        // Close existing connection if it exists
-        if (ws && ws.readyState !== WebSocket.CLOSED) {
-          try {
-            ws.close(1000, 'Page became visible');
-          } catch (err) {
-            // Ignore errors
-          }
-        }
-        
-        // Reconnect with a short delay
         setTimeout(() => {
           if (isSpectator && currentLobbyId) {
             joinAsSpectator();
@@ -672,6 +800,19 @@ document.addEventListener('visibilitychange', () => {
             joinAsPlayer();
           }
         }, 500);
+      } else if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          lastPingTime = Date.now();
+          ws.send(JSON.stringify({ type: 'ping' }));
+        } catch (err) {
+          setTimeout(() => {
+            if (isSpectator && currentLobbyId) {
+              joinAsSpectator();
+            } else if (currentLobbyId) {
+              joinAsPlayer();
+            }
+          }, 500);
+        }
       }
     } else if (ws && ws.readyState === WebSocket.OPEN) {
       updateConnectionStatus('connected');
@@ -679,16 +820,15 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Send periodic pings when page is hidden (for spectators)
 setInterval(() => {
-  if (pageHidden && isSpectator && ws && ws.readyState === WebSocket.OPEN) {
+  if (pageHidden && ws && ws.readyState === WebSocket.OPEN) {
     try {
       ws.send(JSON.stringify({ type: 'ping' }));
     } catch (err) {
-      // Connection issue, will reconnect on visibility change
+      // Connection issue
     }
   }
-}, 15000); // Every 15 seconds
+}, 15000);
 
 window.addEventListener('beforeunload', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -700,6 +840,5 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-// Show lobby by default
 updateConnectionStatus('disconnected');
 safeLog('Game client initialized');
