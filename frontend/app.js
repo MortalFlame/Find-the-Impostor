@@ -6,6 +6,7 @@ const lobbyId = document.getElementById('lobbyId');
 const join = document.getElementById('join');
 const spectate = document.getElementById('spectate');
 const start = document.getElementById('start');
+const exitLobbyBtn = document.getElementById('exitLobby'); // NEW: Exit button
 const players = document.getElementById('players');
 
 const gameHeader = document.getElementById('gameHeader');
@@ -174,6 +175,30 @@ function updatePlayerList(playersData, spectatorsData = []) {
   players.innerHTML = playersHtml;
 }
 
+// NEW: Exit lobby function
+function exitLobby() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'exitLobby' }));
+  }
+  
+  // Reset UI to initial state
+  lobbyCard.classList.remove('hidden');
+  gameCard.classList.add('hidden');
+  gameHeader.classList.add('hidden');
+  
+  // Reset inputs
+  nickname.value = '';
+  nickname.disabled = false;
+  lobbyId.value = '';
+  
+  // Reset state
+  isSpectator = false;
+  currentLobbyId = null;
+  updateConnectionStatus('disconnected');
+  
+  safeLog('Exited lobby');
+}
+
 function joinAsPlayer() {
   if (isReconnecting) return;
   isSpectator = false;
@@ -281,6 +306,18 @@ function connect() {
           return;
         }
 
+        // NEW: Handle lobby exit confirmation
+        if (d.type === 'lobbyExited') {
+          safeLog('Successfully exited lobby:', d.message);
+          lobbyCard.classList.remove('hidden');
+          gameCard.classList.add('hidden');
+          gameHeader.classList.add('hidden');
+          isSpectator = false;
+          currentLobbyId = null;
+          updateConnectionStatus('disconnected');
+          return;
+        }
+
         if (d.type === 'lobbyAssigned') {
           lobbyId.value = d.lobbyId;
           currentLobbyId = d.lobbyId;
@@ -300,8 +337,12 @@ function connect() {
           const isOwner = d.owner === playerId;
           start.disabled = isSpectator || d.players.length < 3 || !isOwner;
           
+          // Show/hide buttons based on spectator status
           spectate.style.display = isSpectator ? 'none' : 'block';
           join.style.display = isSpectator ? 'none' : 'block';
+          
+          // Show exit button when in lobby
+          exitLobbyBtn.style.display = 'block';
           
           if (d.phase && d.phase !== 'lobby') {
             players.innerHTML += `<br><i style="color:#f39c12">Game in progress: ${d.phase}</i>`;
@@ -315,6 +356,9 @@ function connect() {
         if (d.type === 'gameStart') {
           lobbyCard.classList.add('hidden');
           gameCard.classList.remove('hidden');
+          
+          // Hide exit button during game
+          exitLobbyBtn.style.display = 'none';
           
           // Reset restart state
           hasClickedRestart = false;
@@ -398,18 +442,36 @@ function connect() {
         if (d.type === 'gameEnd') {
           const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
           
+          // IMPROVED RESULTS FORMATTING: Color civilians green, impostor red
+          const rolesHtml = d.roles.map(r => {
+            const roleColor = r.role === 'civilian' ? '#2ecc71' : '#e74c3c';
+            const roleName = r.role.charAt(0).toUpperCase() + r.role.slice(1);
+            return `<div style="color:${roleColor}">${r.name}: ${roleName}</div>`;
+          }).join('');
+          
+          // IMPROVED VOTE FORMATTING: "X voted Y" instead of "X -> Y"
+          const votesHtml = Object.entries(d.votes).map(([voter, votedFor]) => {
+            // Find colors for voter and votedFor based on their roles
+            const voterRole = d.roles.find(r => r.name === voter)?.role;
+            const votedForRole = d.roles.find(r => r.name === votedFor)?.role;
+            
+            const voterColor = voterRole === 'civilian' ? '#2ecc71' : '#e74c3c';
+            const votedForColor = votedForRole === 'civilian' ? '#2ecc71' : '#e74c3c';
+            
+            return `<div><span style="color:${voterColor}">${voter}</span> voted <span style="color:${votedForColor}">${votedFor}</span></div>`;
+          }).join('');
+          
           results.innerHTML =
             `<h2 style="color:${winnerColor}; text-align:center">${d.winner} Won!</h2>` +
             `<div><b>Word:</b> ${capitalize(d.secretWord)}</div>` +
             `<div><b>Hint:</b> ${capitalize(d.hint)}</div><hr>` +
-            d.roles.map(r =>
-              `<div style="color:${r.role==='civilian'?'#2ecc71':'#e74c3c'}">
-                ${r.name}: ${r.role.charAt(0).toUpperCase() + r.role.slice(1)}
-              </div>`).join('') +
-            '<hr><b>Votes</b><br>' +
-            Object.entries(d.votes).map(([k,v]) => `${k} → ${v}`).join('<br>');
+            '<b>Roles</b><br>' + rolesHtml +
+            '<hr><b>Votes</b><br>' + votesHtml;
 
           voting.innerHTML = '';
+          
+          // Show exit button again on results screen
+          exitLobbyBtn.style.display = 'block';
           
           if (!isSpectator) {
             restart.classList.remove('hidden');
@@ -492,6 +554,7 @@ function connect() {
 
 join.onclick = joinAsPlayer;
 spectate.onclick = joinAsSpectator;
+exitLobbyBtn.onclick = exitLobby; // NEW: Exit button handler
 
 start.onclick = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
