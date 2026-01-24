@@ -8,21 +8,22 @@ const spectate = document.getElementById('spectate');
 const start = document.getElementById('start');
 const players = document.getElementById('players');
 
+const gameHeader = document.getElementById('gameHeader');
+const lobbyCodeDisplay = document.getElementById('lobbyCodeDisplay');
+const connectionDot = document.getElementById('connectionDot');
+const connectionText = document.getElementById('connectionText');
+
 const lobbyCard = document.querySelector('.lobby-card');
 const gameCard = document.querySelector('.game-card');
-
 const roleReveal = document.getElementById('roleReveal');
 const roleBack = roleReveal.querySelector('.role-back');
 const roleText = document.getElementById('roleText');
 const wordEl = document.getElementById('word');
-
 const round1El = document.getElementById('round1');
 const round2El = document.getElementById('round2');
 const turnEl = document.getElementById('turn');
-
 const input = document.getElementById('input');
 const submit = document.getElementById('submit');
-
 const voting = document.getElementById('voting');
 const results = document.getElementById('results');
 const restart = document.getElementById('restart');
@@ -39,13 +40,13 @@ let currentLobbyId = null;
 let joinType = 'joinLobby';
 let connectionAttempts = 0;
 let maxConnectionAttempts = 5;
-let reconnectDelay = 2000; // Start with 2 seconds
+let reconnectDelay = 2000;
 let hasShownConnectionWarning = false;
 
-// Connection quality indicators
 let lastPingTime = 0;
 let connectionLatency = 0;
 let connectionStable = true;
+let connectionState = 'disconnected';
 
 const DEBUG_MODE = false;
 
@@ -65,13 +66,38 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+function updateConnectionStatus(state, message = '') {
+  connectionState = state;
+  
+  connectionDot.className = 'status-dot ' + state;
+  
+  const statusMessages = {
+    'disconnected': 'Disconnected',
+    'connecting': 'Connecting...',
+    'connected': 'Connected'
+  };
+  
+  connectionText.textContent = message || statusMessages[state] || 'Unknown';
+  
+  if (state === 'disconnected') {
+    lobbyCodeDisplay.style.color = '#e74c3c';
+    lobbyCodeDisplay.style.borderColor = '#e74c3c';
+  } else if (state === 'connected') {
+    lobbyCodeDisplay.style.color = '#2ecc71';
+    lobbyCodeDisplay.style.borderColor = '#2ecc71';
+  } else {
+    lobbyCodeDisplay.style.color = '#f39c12';
+    lobbyCodeDisplay.style.borderColor = '#f39c12';
+  }
+}
+
 function showConnectionWarning(message) {
   if (hasShownConnectionWarning) return;
   
   const warning = document.createElement('div');
   warning.style.cssText = `
     position: fixed;
-    top: 10px;
+    top: 50px;
     left: 50%;
     transform: translateX(-50%);
     background: #e74c3c;
@@ -99,6 +125,47 @@ function showConnectionWarning(message) {
   }, 5000);
 }
 
+function updatePlayerList(playersData, spectatorsData = []) {
+  let playersHtml = '<b>Players:</b><br>';
+  
+  if (Array.isArray(playersData) && playersData.length > 0) {
+    playersData.forEach(player => {
+      const isConnected = player.connected !== false;
+      const statusClass = isConnected ? 'player-connected' : 'player-disconnected';
+      const statusText = isConnected ? '●' : '○';
+      
+      playersHtml += `
+        <div class="player-item">
+          <span class="player-status-dot ${statusClass}"></span>
+          <span class="player-name">${player.name}</span>
+          <span style="font-size:12px; opacity:0.7">${statusText}</span>
+        </div>
+      `;
+    });
+  } else {
+    playersHtml += 'No players yet';
+  }
+  
+  if (spectatorsData && spectatorsData.length > 0) {
+    playersHtml += '<br><br><b>Spectators:</b><br>';
+    spectatorsData.forEach(spectator => {
+      const isConnected = spectator.connected !== false;
+      const statusClass = isConnected ? 'player-connected' : 'player-disconnected';
+      const statusText = isConnected ? '●' : '○';
+      
+      playersHtml += `
+        <div class="spectator-item">
+          <span class="player-status-dot ${statusClass}"></span>
+          <span>${spectator.name}</span>
+          <span style="font-size:12px; opacity:0.7">${statusText}</span>
+        </div>
+      `;
+    });
+  }
+  
+  players.innerHTML = playersHtml;
+}
+
 function joinAsPlayer() {
   if (isReconnecting) return;
   isSpectator = false;
@@ -123,7 +190,9 @@ function connect() {
     showConnectionWarning('Connection failed. Please refresh the page.');
     lobbyCard.classList.remove('hidden');
     gameCard.classList.add('hidden');
+    gameHeader.classList.add('hidden');
     isReconnecting = false;
+    updateConnectionStatus('disconnected', 'Connection failed');
     return;
   }
 
@@ -138,6 +207,7 @@ function connect() {
   }
 
   try {
+    updateConnectionStatus('connecting', 'Connecting to server...');
     ws = new WebSocket(wsUrl);
     connectionAttempts++;
     
@@ -147,8 +217,10 @@ function connect() {
       reconnectDelay = 2000;
       isReconnecting = false;
       hasShownConnectionWarning = false;
+      updateConnectionStatus('connected');
       
-      // Start ping interval
+      gameHeader.classList.remove('hidden');
+      
       if (window.pingInterval) clearInterval(window.pingInterval);
       window.pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -159,7 +231,7 @@ function connect() {
             safeError('Failed to send ping');
           }
         }
-      }, 25000); // Ping every 25 seconds
+      }, 25000);
       
       if (joinType === 'joinSpectator') {
         ws.send(JSON.stringify({
@@ -185,12 +257,16 @@ function connect() {
 
         if (d.type === 'pong') {
           connectionLatency = Date.now() - lastPingTime;
-          connectionStable = connectionLatency < 1000; // Less than 1 second
+          connectionStable = connectionLatency < 1000;
+          if (!connectionStable) {
+            updateConnectionStatus('connected', 'Poor connection');
+          } else {
+            updateConnectionStatus('connected');
+          }
           return;
         }
 
         if (d.type === 'error') {
-          // Don't show alert for reconnection errors
           if (!isReconnecting) {
             alert(d.message);
           }
@@ -202,6 +278,8 @@ function connect() {
           currentLobbyId = d.lobbyId;
           isSpectator = d.isSpectator || false;
           
+          lobbyCodeDisplay.textContent = d.lobbyId;
+          
           if (isSpectator) {
             nickname.value = nickname.value.startsWith('👁️ ') ? nickname.value : `👁️ ${nickname.value.trim()}`;
             nickname.disabled = true;
@@ -209,11 +287,7 @@ function connect() {
         }
 
         if (d.type === 'lobbyUpdate') {
-          let playersHtml = '<b>Players:</b><br>' + d.players.join('<br>');
-          if (d.spectators && d.spectators.length > 0) {
-            playersHtml += '<br><br><b>Spectators:</b><br>' + d.spectators.join('<br>');
-          }
-          players.innerHTML = playersHtml;
+          updatePlayerList(d.players, d.spectators);
           
           const isOwner = d.owner === playerId;
           start.disabled = isSpectator || d.players.length < 3 || !isOwner;
@@ -345,6 +419,7 @@ function connect() {
 
     ws.onerror = (error) => {
       safeError('Connection error');
+      updateConnectionStatus('disconnected', 'Connection error');
     };
 
     ws.onclose = (event) => {
@@ -354,17 +429,18 @@ function connect() {
         clearInterval(window.pingInterval);
       }
       
-      // Don't reconnect for normal closures
       if (event.code === 1000 || event.code === 1001) {
+        updateConnectionStatus('disconnected', 'Disconnected');
         return;
       }
       
-      // Show warning if we were in a game
       if (gameCard && !gameCard.classList.contains('hidden')) {
         showConnectionWarning('Connection lost. Reconnecting...');
+        updateConnectionStatus('connecting', 'Reconnecting...');
+      } else {
+        updateConnectionStatus('disconnected', 'Connection lost');
       }
       
-      // Exponential backoff for reconnection
       isReconnecting = true;
       setTimeout(() => {
         if (isSpectator && currentLobbyId) {
@@ -374,17 +450,18 @@ function connect() {
         } else {
           lobbyCard.classList.remove('hidden');
           gameCard.classList.add('hidden');
+          gameHeader.classList.add('hidden');
         }
-        reconnectDelay = Math.min(reconnectDelay * 1.5, 30000); // Max 30 seconds delay
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
       }, reconnectDelay);
     };
   } catch (error) {
     safeError('Failed to create WebSocket:', error);
+    updateConnectionStatus('disconnected', 'Failed to connect');
     setTimeout(() => connect(), reconnectDelay);
   }
 }
 
-// Event listeners
 join.onclick = joinAsPlayer;
 spectate.onclick = joinAsSpectator;
 
@@ -438,7 +515,6 @@ window.vote = (v, btnElement) => {
   });
 };
 
-// Enter key support
 nickname.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') joinAsPlayer();
 });
@@ -451,22 +527,22 @@ input.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isSpectator) submit.click();
 });
 
-// Enhanced page visibility handling
 let hiddenTime = null;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    // Page is hidden (user switched tabs/minimized)
     hiddenTime = Date.now();
     safeLog('Page hidden - connection may be suspended');
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      updateConnectionStatus('connecting', 'Page inactive...');
+    }
   } else {
-    // Page is visible again
     const hiddenDuration = hiddenTime ? Date.now() - hiddenTime : 0;
     safeLog(`Page visible after ${hiddenDuration}ms`);
     
-    // If page was hidden for a while, check connection
     if (hiddenDuration > 5000) {
       if (ws && ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING) {
         safeLog('Reconnecting after page visibility change');
+        updateConnectionStatus('connecting', 'Reconnecting...');
         setTimeout(() => {
           if (isSpectator && currentLobbyId) {
             joinAsSpectator();
@@ -475,11 +551,12 @@ document.addEventListener('visibilitychange', () => {
           }
         }, 1000);
       }
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
+      updateConnectionStatus('connected');
     }
   }
 });
 
-// Handle beforeunload (page refresh/close)
 window.addEventListener('beforeunload', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
@@ -490,5 +567,5 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-// Initialize
+updateConnectionStatus('disconnected');
 safeLog('Game client initialized');
