@@ -154,7 +154,7 @@ function startTurnTimer(seconds) {
   
   turnTimerEl.classList.remove('hidden');
   
-  const circumference = 2 * Math.PI * 18; // Smaller radius: 18 instead of 45
+  const circumference = 2 * Math.PI * 18;
   
   updateTimerDisplay(timeLeft, circumference);
   
@@ -181,7 +181,6 @@ function updateTimerDisplay(timeLeft, circumference) {
   
   const progress = (timeLeft / currentTurnTime) * 100;
   
-  // Clockwise rotation: start at 12 o'clock and go clockwise
   const offset = circumference - (progress / 100) * circumference;
   timerProgress.style.strokeDashoffset = offset;
 }
@@ -255,7 +254,29 @@ function exitLobby() {
     }
   }
   
-  resetToLobbyScreen();
+  // FIX: Reset UI immediately and clear player list
+  lobbyCard.classList.remove('hidden');
+  gameCard.classList.add('hidden');
+  gameHeader.classList.add('hidden');
+  
+  nickname.value = nickname.value.replace('👁️ ', '');
+  nickname.disabled = false;
+  lobbyId.value = '';
+  players.innerHTML = '';
+  
+  isSpectator = false;
+  currentLobbyId = null;
+  isReconnecting = false;
+  connectionAttempts = 0;
+  updateConnectionStatus('disconnected');
+  
+  stopTurnTimer();
+  
+  if (window.pingInterval) {
+    clearInterval(window.pingInterval);
+    window.pingInterval = null;
+  }
+  
   safeLog('Exited lobby');
 }
 
@@ -267,6 +288,7 @@ function resetToLobbyScreen() {
   nickname.value = nickname.value.replace('👁️ ', '');
   nickname.disabled = false;
   lobbyId.value = '';
+  players.innerHTML = '';
   
   isSpectator = false;
   currentLobbyId = null;
@@ -428,9 +450,8 @@ function connect() {
             players.innerHTML += `<br><i style="color:#f39c12">Game in progress: ${d.phase}</i>`;
           }
           
-          // FIX: Update spectator instructions
           if (isSpectator && (d.phase === 'lobby' || d.phase === 'results')) {
-            players.innerHTML += `<br><i style="color:#9b59b6">Click "Join Next Game" button to play next round</i>`;
+            players.innerHTML += `<br><i style="color:#9b59b6">Click "Join Next Game" to play next round</i>`;
           }
         }
 
@@ -446,7 +467,6 @@ function connect() {
           restart.classList.add('hidden');
           restart.style.opacity = '1';
           
-          // FIX: Show appropriate restart button for spectators
           if (isSpectator || d.role === 'spectator') {
             restart.innerText = 'Join Next Game';
             restart.classList.remove('hidden');
@@ -569,7 +589,6 @@ function connect() {
           
           exitLobbyBtn.style.display = 'block';
           
-          // FIX: Show appropriate restart button
           if (!isSpectator) {
             restart.classList.remove('hidden');
             restart.innerText = 'Restart Game';
@@ -598,7 +617,6 @@ function connect() {
             return `<div style="color:${roleColor}">${r.name}: ${roleName}</div>`;
           }).join('');
           
-          // FIX: Change vote format to 'x voted for -> y'
           const votesHtml = Object.entries(d.votes).map(([voter, votedFor]) => {
             const voterRole = d.roles.find(r => r.name === voter)?.role;
             const votedForRole = d.roles.find(r => r.name === votedFor)?.role;
@@ -615,13 +633,12 @@ function connect() {
             `<div><b>Hint:</b> ${capitalize(d.hint)}</div><hr>` +
             '<b>Roles</b><br>' + rolesHtml +
             '<hr><b>Votes</b><br>' + votesHtml +
-            '<br><br>'; // Add blank space before restart button
+            '<br><br>';
 
           voting.innerHTML = '';
           
           exitLobbyBtn.style.display = 'block';
           
-          // FIX: Show appropriate restart button
           if (!isSpectator) {
             restart.classList.remove('hidden');
             restart.innerText = 'Restart Game';
@@ -731,7 +748,6 @@ submit.onclick = () => {
   input.value = '';
 };
 
-// FIX: Separate restart handling for spectators vs players
 restart.onclick = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     showConnectionWarning('Connection lost. Please wait for reconnection...');
@@ -739,13 +755,11 @@ restart.onclick = () => {
   }
   
   if (isSpectator) {
-    // Spectators send a regular restart message, server will convert them
     ws.send(JSON.stringify({ type: 'restart' }));
     restart.innerText = 'Joining next game...';
     restart.disabled = true;
     restart.style.opacity = '0.7';
   } else {
-    // Players send regular restart
     hasClickedRestart = true;
     ws.send(JSON.stringify({ type: 'restart' }));
     restart.innerText = 'Waiting for others...';
