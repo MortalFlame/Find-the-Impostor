@@ -254,7 +254,6 @@ function exitLobby() {
     }
   }
   
-  // FIX: Reset UI immediately and clear player list
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
   gameHeader.classList.add('hidden');
@@ -507,6 +506,7 @@ function connect() {
         }
 
         if (d.type === 'turnUpdate') {
+          // FIX: Update round displays correctly
           round1El.innerHTML = d.round1.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
           round2El.innerHTML = d.round2.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
           
