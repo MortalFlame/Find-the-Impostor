@@ -450,35 +450,62 @@ button:disabled { opacity: 0.4; }
   font-size: 13px;
   display: flex;
   align-items: center;
+  overflow: hidden;
+}
+
+/* Roles section - align role text */
+.role-results-item {
+  background: rgba(13, 17, 28, 0.6);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  display: flex;
   justify-content: space-between;
-  overflow: hidden;
+  align-items: center;
 }
 
-.results-item .player-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-grow: 1;
-}
-
-.results-item .player-role {
-  font-weight: 600;
-  margin-left: 8px;
-  flex-shrink: 0;
-}
-
-.results-item .vote-voter,
-.results-item .vote-voted {
+.role-results-item .player-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-width: 0;
+  margin-right: 10px;
 }
 
-.results-item .vote-arrow {
-  color: #95a5a6;
-  margin: 0 4px;
+.role-results-item .player-role {
+  font-weight: 600;
   flex-shrink: 0;
+  min-width: 75px;
+  text-align: right;
+}
+
+/* Votes section - center arrow */
+.vote-results-item {
+  background: rgba(13, 17, 28, 0.6);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vote-results-item .vote-voter,
+.vote-results-item .vote-voted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.vote-results-item .vote-arrow {
+  color: #95a5a6;
+  margin: 0 8px;
+  flex-shrink: 0;
+  text-align: center;
+  width: 20px;
 }
 
 @keyframes fadeUp {
