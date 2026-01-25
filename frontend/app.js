@@ -447,12 +447,10 @@ function connect() {
           lobbyId.value = d.lobbyId;
           currentLobbyId = d.lobbyId;
           isSpectator = d.isSpectator || false;
-          // Use the server-assigned name (which might have suffix)
           myPlayerName = d.yourName || d.playerName || nickname.value.trim();
           
           lobbyCodeDisplay.textContent = d.lobbyId;
           
-          // Update player name display in header
           if (document.getElementById('playerNameDisplay')) {
             document.getElementById('playerNameDisplay').textContent = myPlayerName;
           }
@@ -493,7 +491,6 @@ function connect() {
           spectatorHasClickedRestart = false;
           spectatorWantsToJoin = false;
           
-          // Update myPlayerName if server sent it (for duplicate names)
           if (d.playerName) {
             myPlayerName = d.playerName;
             if (document.getElementById('playerNameDisplay')) {
@@ -505,7 +502,6 @@ function connect() {
           restart.classList.add('hidden');
           restart.style.opacity = '1';
           
-          // Reset button states
           if (isSpectator || d.role === 'spectator') {
             restart.innerText = 'Join Next Game';
             restart.classList.remove('hidden');
@@ -567,7 +563,6 @@ function connect() {
             input.value = '';
             input.placeholder = isSpectator ? 'Spectating voting...' : 'Get ready to vote...';
           } else {
-            // Check if it's our turn using the server-assigned name
             const isMyTurn = d.currentPlayer === myPlayerName;
             
             if (isSpectator) {
@@ -600,7 +595,7 @@ function connect() {
           } else {
             voting.innerHTML = '<h3>Vote</h3>' +
               d.players
-                .filter(p => p !== myPlayerName)  // Use our server-assigned name
+                .filter(p => p !== myPlayerName)
                 .map(p => `<button class="vote-btn" onclick="vote('${p}', this)">${p}</button>`)
                 .join('');
           }
@@ -622,13 +617,12 @@ function connect() {
             </div>`;
           }
           
-          // Create two-column layout for roles
           let rolesHtml = '<div class="results-grid">';
           d.roles.forEach(r => {
             const roleColor = r.role === 'civilian' ? '#2ecc71' : '#e74c3c';
             const roleName = r.role.charAt(0).toUpperCase() + r.role.slice(1);
             rolesHtml += `
-              <div class="results-item" style="color:${roleColor}">
+              <div class="role-results-item" style="color:${roleColor}">
                 <span class="player-name">${r.name}</span>
                 <span class="player-role">${roleName}</span>
               </div>
@@ -669,13 +663,12 @@ function connect() {
           
           const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
           
-          // Create two-column layout for roles
           let rolesHtml = '<div class="results-grid">';
           d.roles.forEach(r => {
             const roleColor = r.role === 'civilian' ? '#2ecc71' : '#e74c3c';
             const roleName = r.role.charAt(0).toUpperCase() + r.role.slice(1);
             rolesHtml += `
-              <div class="results-item" style="color:${roleColor}">
+              <div class="role-results-item" style="color:${roleColor}">
                 <span class="player-name">${r.name}</span>
                 <span class="player-role">${roleName}</span>
               </div>
@@ -683,7 +676,6 @@ function connect() {
           });
           rolesHtml += '</div>';
           
-          // Create two-column layout for votes
           let votesHtml = '<div class="results-grid">';
           Object.entries(d.votes).forEach(([voter, votedFor]) => {
             const voterRole = d.roles.find(r => r.name === voter)?.role;
@@ -693,7 +685,7 @@ function connect() {
             const votedForColor = votedForRole === 'civilian' ? '#2ecc71' : '#e74c3c';
             
             votesHtml += `
-              <div class="results-item">
+              <div class="vote-results-item">
                 <span class="vote-voter" style="color:${voterColor}">${voter}</span>
                 <div class="vote-arrow">→</div>
                 <span class="vote-voted" style="color:${votedForColor}">${votedFor}</span>
@@ -767,14 +759,11 @@ function connect() {
           spectatorHasClickedRestart = false;
           nickname.value = nickname.value.replace('👁️ ', '');
           nickname.disabled = false;
-          // Keep the existing myPlayerName (which already has the suffix if needed)
           
-          // Update player name display
           if (document.getElementById('playerNameDisplay')) {
             document.getElementById('playerNameDisplay').textContent = myPlayerName;
           }
           
-          // Update restart button
           restart.innerText = 'Restart Game';
           restart.disabled = false;
           restart.style.opacity = '1';
