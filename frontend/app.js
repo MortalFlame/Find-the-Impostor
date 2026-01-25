@@ -175,7 +175,8 @@ function startTurnTimer(seconds) {
 }
 
 function updateTimerDisplay(timeLeft, circumference) {
-  timerText.textContent = timeLeft;
+  // Remove the number countdown - only update visual progress
+  timerText.textContent = ''; // Empty text instead of showing number
   
   updateTimerColor(timeLeft);
   
@@ -669,10 +670,11 @@ function connect() {
         }
 
         if (d.type === 'roleChanged') {
-          alert(d.message);
+          // Changed: Remove the alert popup
           isSpectator = false;
           nickname.value = nickname.value.replace('👁️ ', '');
           nickname.disabled = false;
+          // Button appearance will be updated automatically via other messages
         }
 
       } catch (error) {
