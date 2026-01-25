@@ -52,7 +52,7 @@ let turnTimer = null;
 let currentTurnTime = 30;
 let spectatorWantsToJoin = false;
 let myPlayerName = '';
-let spectatorHasClickedRestart = false; // Track if spectator clicked restart
+let spectatorHasClickedRestart = false;
 
 let lastPingTime = 0;
 let connectionLatency = 0;
@@ -540,11 +540,9 @@ function connect() {
           } else if (d.role === 'impostor') {
             roleBack.className = `role-back ${d.role}`;
             roleText.innerHTML = '<span style="color:#e74c3c">Impostor</span>';
-            // Impostors see the hint (and optionally the word if sent)
+            // Impostors only see the hint - NOT the word!
             wordEl.textContent = `Hint: ${capitalize(d.word)}`;
-            if (d.secretWord) {
-              wordEl.innerHTML += `<div style="margin-top: 8px; font-size: 14px; color: #f1c40f;"><em>The actual word is: ${capitalize(d.secretWord)}</em></div>`;
-            }
+            // Do NOT show the word to impostor
           }
         }
 
@@ -646,12 +644,6 @@ function connect() {
             restart.disabled = false;
             restart.style.opacity = '1';
             hasClickedRestart = false;
-          } else if (spectatorWantsToJoin) {
-            restart.classList.remove('hidden');
-            restart.innerText = 'Restart Game';
-            restart.disabled = false;
-            restart.style.opacity = '1';
-            spectatorHasClickedRestart = false;
           } else {
             restart.classList.remove('hidden');
             restart.innerText = 'Join Next Game';
@@ -703,12 +695,6 @@ function connect() {
             restart.disabled = false;
             restart.style.opacity = '1';
             hasClickedRestart = false;
-          } else if (spectatorWantsToJoin) {
-            restart.classList.remove('hidden');
-            restart.innerText = 'Restart Game';
-            restart.disabled = false;
-            restart.style.opacity = '1';
-            spectatorHasClickedRestart = false;
           } else {
             restart.classList.remove('hidden');
             restart.innerText = 'Join Next Game';
@@ -723,11 +709,19 @@ function connect() {
         if (d.type === 'restartUpdate') {
           // Handle spectator restart updates
           if (d.isSpectator) {
-            if (d.wantsToJoin || spectatorHasClickedRestart) {
-              // Spectator has clicked to join or restart, show waiting state
-              restart.innerText = `Waiting for others... (${d.readyCount}/${d.totalPlayers})`;
-              restart.disabled = true;
-              restart.style.opacity = '0.7';
+            if (d.wantsToJoin || d.status === 'joining') {
+              // Spectator has clicked to join
+              if (spectatorHasClickedRestart) {
+                // Show waiting state
+                restart.innerText = `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
+                restart.disabled = true;
+                restart.style.opacity = '0.7';
+              } else {
+                // First click - show confirmation
+                restart.innerText = 'Join Next Game';
+                restart.disabled = false;
+                restart.style.opacity = '1';
+              }
             } else {
               // Spectator hasn't clicked yet
               restart.innerText = 'Join Next Game';
@@ -848,19 +842,12 @@ restart.onclick = () => {
   }
   
   if (isSpectator) {
-    // First click: Join Next Game -> transition to Restart Game
-    // Second click: Restart Game -> show waiting state
     if (restart.innerText === 'Join Next Game') {
+      // First click: Join Next Game
       spectatorWantsToJoin = true;
       spectatorHasClickedRestart = true;
       ws.send(JSON.stringify({ type: 'restart' }));
       restart.innerText = 'Joining next game...';
-      restart.disabled = true;
-      restart.style.opacity = '0.7';
-    } else if (restart.innerText === 'Restart Game') {
-      spectatorHasClickedRestart = true;
-      ws.send(JSON.stringify({ type: 'restart' }));
-      restart.innerText = 'Waiting for others...';
       restart.disabled = true;
       restart.style.opacity = '0.7';
     }
