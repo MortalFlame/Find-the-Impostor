@@ -348,7 +348,7 @@ button:disabled { opacity: 0.4; }
 .timer-svg {
   width: 100%;
   height: 100%;
-  transform: rotate(-90deg); /* Start from top (12 o'clock) */
+  transform: rotate(-90deg);
 }
 
 .timer-base {
@@ -357,7 +357,6 @@ button:disabled { opacity: 0.4; }
   stroke-width: 4;
 }
 
-/* FIXED: Timer goes clockwise (remove previous transform from here) */
 .timer-progress {
   fill: none;
   stroke-width: 4;
@@ -366,7 +365,6 @@ button:disabled { opacity: 0.4; }
   stroke-dashoffset: 113;
   transition: stroke-dashoffset 1s linear, stroke 1s ease;
   transform-origin: center;
-  /* Remove individual rotation - now handled by parent SVG */
 }
 
 .timer-progress.green {
@@ -385,7 +383,6 @@ button:disabled { opacity: 0.4; }
   stroke: #e74c3c;
 }
 
-/* Timer text removed as requested */
 .timer-text {
   display: none;
 }
@@ -432,10 +429,56 @@ button:disabled { opacity: 0.4; }
   cursor: not-allowed;
 }
 
+/* Results screen styles */
 #results {
   margin-top: 12px;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.results-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.results-item {
+  background: rgba(13, 17, 28, 0.6);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.results-item .player-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-grow: 1;
+}
+
+.results-item .player-role {
+  font-weight: 600;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.results-item .vote-voter,
+.results-item .vote-voted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.results-item .vote-arrow {
+  color: #95a5a6;
+  margin: 0 4px;
+  flex-shrink: 0;
 }
 
 @keyframes fadeUp {
