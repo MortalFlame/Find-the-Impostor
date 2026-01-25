@@ -156,7 +156,7 @@ function startGame(lobby) {
         type: 'gameStart',
         role: player.role,
         word: player.role === 'civilian' ? word : hint,
-        secretWord: word, // Send to everyone for reference
+        secretWord: word, // Only for impostor and spectator
         hint: hint
       }));
     } catch (err) {
@@ -495,9 +495,7 @@ wss.on('connection', (ws, req) => {
                 ws.send(JSON.stringify({
                   type: 'gameStart',
                   role: player.role,
-                  word: player.role === 'civilian' ? lobby.word : lobby.hint,
-                  secretWord: lobby.word,
-                  hint: lobby.hint
+                  word: player.role === 'civilian' ? lobby.word : lobby.hint
                 }));
                 
                 if (lobby.phase === 'round1' || lobby.phase === 'round2') {
