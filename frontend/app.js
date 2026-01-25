@@ -11,6 +11,7 @@ const players = document.getElementById('players');
 
 const gameHeader = document.getElementById('gameHeader');
 const lobbyCodeDisplay = document.getElementById('lobbyCodeDisplay');
+const playerNameDisplay = document.getElementById('playerNameDisplay'); // Will be added to HTML
 const connectionDot = document.getElementById('connectionDot');
 const connectionText = document.getElementById('connectionText');
 
@@ -20,6 +21,7 @@ const roleReveal = document.getElementById('roleReveal');
 const roleBack = roleReveal.querySelector('.role-back');
 const roleText = document.getElementById('roleText');
 const wordEl = document.getElementById('word');
+const hintEl = document.getElementById('hint'); // Will be added to HTML
 const round1El = document.getElementById('round1');
 const round2El = document.getElementById('round2');
 const turnEl = document.getElementById('turn');
@@ -49,7 +51,8 @@ let hasShownConnectionWarning = false;
 let hasClickedRestart = false;
 let turnTimer = null;
 let currentTurnTime = 30;
-let spectatorWantsToJoin = false; // NEW: Track if spectator wants to join next game
+let spectatorWantsToJoin = false;
+let myPlayerName = ''; // Store the player's name
 
 let lastPingTime = 0;
 let connectionLatency = 0;
@@ -211,11 +214,13 @@ function updatePlayerList(playersData, spectatorsData = []) {
     playersData.forEach(player => {
       const isConnected = player.connected !== false;
       const statusClass = isConnected ? 'player-connected' : 'player-disconnected';
+      const isMe = player.name === myPlayerName;
+      const nameDisplay = isMe ? `<strong>${player.name}</strong>` : player.name;
       
       playersHtml += `
         <div class="player-item">
           <span class="player-status-dot ${statusClass}"></span>
-          <span class="player-name" title="${player.name}">${player.name}</span>
+          <span class="player-name" title="${player.name}">${nameDisplay}</span>
         </div>
       `;
     });
@@ -232,11 +237,13 @@ function updatePlayerList(playersData, spectatorsData = []) {
     spectatorsData.forEach(spectator => {
       const isConnected = spectator.connected !== false;
       const statusClass = isConnected ? 'player-connected' : 'player-disconnected';
+      const isMe = spectator.name === myPlayerName;
+      const nameDisplay = isMe ? `<strong>${spectator.name}</strong>` : spectator.name;
       
       playersHtml += `
         <div class="player-item spectator-item">
           <span class="player-status-dot ${statusClass}"></span>
-          <span class="player-name" title="${spectator.name}">${spectator.name}</span>
+          <span class="player-name" title="${spectator.name}">${nameDisplay}</span>
         </div>
       `;
     });
@@ -275,7 +282,8 @@ function exitLobby() {
   currentLobbyId = null;
   isReconnecting = false;
   connectionAttempts = 0;
-  spectatorWantsToJoin = false; // Reset when exiting lobby
+  spectatorWantsToJoin = false;
+  myPlayerName = '';
   updateConnectionStatus('disconnected');
   
   stopTurnTimer();
@@ -302,7 +310,8 @@ function resetToLobbyScreen() {
   currentLobbyId = null;
   isReconnecting = false;
   connectionAttempts = 0;
-  spectatorWantsToJoin = false; // Reset when resetting
+  spectatorWantsToJoin = false;
+  myPlayerName = '';
   updateConnectionStatus('disconnected');
   
   stopTurnTimer();
@@ -437,8 +446,14 @@ function connect() {
           lobbyId.value = d.lobbyId;
           currentLobbyId = d.lobbyId;
           isSpectator = d.isSpectator || false;
+          myPlayerName = d.playerName || nickname.value.trim();
           
           lobbyCodeDisplay.textContent = d.lobbyId;
+          
+          // Update player name display in header
+          if (document.getElementById('playerNameDisplay')) {
+            document.getElementById('playerNameDisplay').textContent = myPlayerName;
+          }
           
           if (isSpectator) {
             nickname.value = nickname.value.startsWith('👁️ ') ? nickname.value : `👁️ ${nickname.value.trim()}`;
@@ -510,21 +525,39 @@ function connect() {
           if (d.role === 'spectator') {
             roleBack.className = 'role-back spectator';
             roleText.innerHTML = '<span style="color:#9b59b6">👁️ Spectator</span>';
-            wordEl.textContent = 'Watching Game';
+            wordEl.textContent = `Word: ${capitalize(d.word)}`;
+            // Show hint for spectators
+            if (d.hint) {
+              wordEl.textContent += ` | Hint: ${capitalize(d.hint)}`;
+            }
           } else if (d.role === 'civilian') {
             roleBack.className = `role-back ${d.role}`;
             roleText.innerHTML = '<span style="color:#2ecc71">Civilian</span>';
-            wordEl.textContent = capitalize(d.word);
+            wordEl.textContent = `Word: ${capitalize(d.word)}`;
+            if (d.hint) {
+              wordEl.textContent += ` | Hint: ${capitalize(d.hint)}`;
+            }
           } else if (d.role === 'impostor') {
             roleBack.className = `role-back ${d.role}`;
             roleText.innerHTML = '<span style="color:#e74c3c">Impostor</span>';
-            wordEl.textContent = capitalize(d.word);
+            wordEl.textContent = `Hint: ${capitalize(d.word)}`;
+            if (d.secretWord) {
+              wordEl.textContent += ` | The word is: ${capitalize(d.secretWord)}`;
+            }
           }
         }
 
         if (d.type === 'turnUpdate') {
-          round1El.innerHTML = d.round1.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
-          round2El.innerHTML = d.round2.map(r => `${r.name}: ${capitalize(r.word)}`).join('<br>');
+          // Handle empty words from timeouts - show as "(skipped)"
+          const formatWord = (entry) => {
+            if (entry.word === '' || entry.word === null || entry.word === undefined) {
+              return `${entry.name}: (skipped)`;
+            }
+            return `${entry.name}: ${capitalize(entry.word)}`;
+          };
+          
+          round1El.innerHTML = d.round1.map(formatWord).join('<br>');
+          round2El.innerHTML = d.round2.map(formatWord).join('<br>');
           
           stopTurnTimer();
           
@@ -534,7 +567,7 @@ function connect() {
             input.value = '';
             input.placeholder = isSpectator ? 'Spectating voting...' : 'Get ready to vote...';
           } else {
-            const isMyTurn = d.currentPlayer === nickname.value.replace('👁️ ', '');
+            const isMyTurn = d.currentPlayer === myPlayerName;
             
             if (isSpectator) {
               turnEl.textContent = `Spectating - Turn: ${d.currentPlayer}`;
@@ -566,7 +599,7 @@ function connect() {
           } else {
             voting.innerHTML = '<h3>Vote</h3>' +
               d.players
-                .filter(p => p !== nickname.value.replace('👁️ ', ''))
+                .filter(p => p !== myPlayerName)
                 .map(p => `<button class="vote-btn" onclick="vote('${p}', this)">${p}</button>`)
                 .join('');
           }
@@ -693,10 +726,12 @@ function connect() {
             restart.style.opacity = '0.7';
           } else {
             // NEW: Update button text based on spectatorWantsToJoin state
-            if (isSpectator && spectatorWantsToJoin) {
-              restart.innerText = 'Restart Game';
-            } else if (isSpectator) {
-              restart.innerText = 'Join Next Game';
+            if (d.isSpectator) {
+              if (d.wantsToJoin || spectatorWantsToJoin) {
+                restart.innerText = 'Restart Game';
+              } else {
+                restart.innerText = 'Join Next Game';
+              }
             } else {
               restart.innerText = 'Restart Game';
             }
@@ -711,6 +746,12 @@ function connect() {
           spectatorWantsToJoin = false; // Reset when role actually changes
           nickname.value = nickname.value.replace('👁️ ', '');
           nickname.disabled = false;
+          myPlayerName = nickname.value;
+          
+          // Update player name display
+          if (document.getElementById('playerNameDisplay')) {
+            document.getElementById('playerNameDisplay').textContent = myPlayerName;
+          }
         }
 
       } catch (error) {
@@ -843,7 +884,6 @@ input.addEventListener('keypress', (e) => {
 
 let hiddenTime = null;
 let pageHidden = false;
-let timerStartTime = null; // Track when timer started
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
@@ -866,15 +906,6 @@ document.addEventListener('visibilitychange', () => {
     pageHidden = false;
     const hiddenDuration = hiddenTime ? Date.now() - hiddenTime : 0;
     safeLog(`Page visible after ${hiddenDuration}ms`);
-    
-    // NEW: Fix timer animation when switching back to tab
-    if (turnTimer && timerStartTime) {
-      const elapsed = Date.now() - timerStartTime;
-      const timeLeft = Math.max(0, currentTurnTime - Math.floor(elapsed / 1000));
-      
-      // Restart timer with correct remaining time
-      startTurnTimer(timeLeft);
-    }
     
     if (hiddenDuration > 5000) {
       if (ws && ws.readyState !== WebSocket.OPEN) {
