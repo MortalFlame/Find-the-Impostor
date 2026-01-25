@@ -154,7 +154,6 @@ function startGame(lobby) {
     }
   });
 
-  // FIX: Find the first connected player for the turn
   let firstConnectedIndex = 0;
   for (let i = 0; i < lobby.players.length; i++) {
     if (lobby.players[i].ws?.readyState === 1) {
@@ -202,11 +201,9 @@ function startTurnTimer(lobby) {
 function skipCurrentPlayer(lobby) {
   console.log(`Skipping player ${lobby.players[lobby.turn]?.name}`);
   
-  // Move to next player
   let nextIndex = (lobby.turn + 1) % lobby.players.length;
   let attempts = 0;
   
-  // Find next connected player
   while (attempts < lobby.players.length) {
     if (lobby.players[nextIndex]?.ws?.readyState === 1) {
       lobby.turn = nextIndex;
@@ -216,7 +213,6 @@ function skipCurrentPlayer(lobby) {
     attempts++;
   }
   
-  // If no connected players found (shouldn't happen with game end conditions)
   if (attempts >= lobby.players.length) {
     console.log('No connected players found to take turn');
     return;
@@ -225,7 +221,6 @@ function skipCurrentPlayer(lobby) {
   const currentRound = lobby.phase === 'round1' ? lobby.round1 : lobby.round2;
   const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
   
-  // Check if all connected players have submitted for this round
   if (currentRound.length >= connectedPlayers.length) {
     lobby.turn = 0;
     
@@ -604,7 +599,6 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'submitWord') {
-        // FIX: Check if it's the current player's turn by ID, not just index
         const currentPlayer = lobby.players[lobby.turn];
         if (!currentPlayer || currentPlayer.id !== player.id) {
           console.log(`Not ${player.name}'s turn (it's ${currentPlayer?.name}'s turn)`);
@@ -624,7 +618,6 @@ wss.on('connection', (ws, req) => {
           lobby.turnTimeout = null;
         }
 
-        // Move to next connected player
         let nextIndex = (lobby.turn + 1) % lobby.players.length;
         let attempts = 0;
         
@@ -637,7 +630,6 @@ wss.on('connection', (ws, req) => {
           attempts++;
         }
         
-        // If we've gone through all players, check if round is complete
         if (attempts >= lobby.players.length) {
           lobby.turn = 0;
           
@@ -648,7 +640,6 @@ wss.on('connection', (ws, req) => {
             if (lobby.phase === 'round1') {
               lobby.phase = 'round2';
               lobby.turn = 0;
-              // Find first connected player for next round
               for (let i = 0; i < lobby.players.length; i++) {
                 if (lobby.players[i]?.ws?.readyState === 1) {
                   lobby.turn = i;
@@ -741,7 +732,6 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'restart') {
-        // Only players can restart, not spectators
         if (!lobby.restartReady.includes(player.id)) {
           lobby.restartReady.push(player.id);
         }
@@ -762,13 +752,11 @@ wss.on('connection', (ws, req) => {
           }
         });
         
-        // FIX: Also include spectators who want to join next game
         const spectatorsWantingToJoin = lobby.spectators.filter(s => 
           s.ws?.readyState === 1 && s.wantsToJoinNextGame
         );
         
         if (lobby.restartReady.length === connectedPlayers.length) {
-          // Add spectators who want to join as players
           spectatorsWantingToJoin.forEach(spectator => {
             const spectatorIndex = lobby.spectators.findIndex(s => s.id === spectator.id);
             if (spectatorIndex !== -1) {
@@ -949,7 +937,7 @@ wss.on('connection', (ws, req) => {
           isSpectator: true,
           connectionId,
           lastActionTime: Date.now(),
-          wantsToJoinNextGame: false // NEW: Track if spectator wants to join next game
+          wantsToJoinNextGame: false
         };
         lobby.spectators.push(player);
       }
