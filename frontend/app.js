@@ -476,8 +476,18 @@ function connect() {
             players.innerHTML += `<br><i style="color:#f39c12">Game in progress: ${d.phase}</i>`;
           }
           
+          // Show message for spectators
           if (isSpectator && (d.phase === 'lobby' || d.phase === 'results')) {
             players.innerHTML += `<br><i style="color:#9b59b6">Click "Join Next Game" to play next round</i>`;
+          }
+          
+          // Show message for new players joining during results
+          if (d.phase === 'results' && !isSpectator) {
+            // Check if this player has a role (was in the game)
+            const myPlayerInfo = d.players.find(p => p.name === myPlayerName);
+            if (!myPlayerInfo || !myPlayerInfo.role) {
+              players.innerHTML += `<br><i style="color:#f39c12">Joining next game...</i>`;
+            }
           }
         }
 
@@ -644,7 +654,7 @@ function connect() {
           
           exitLobbyBtn.style.display = 'block';
           
-          // NEW: Handle restart button state based on spectator status and role
+          // Handle restart button state based on spectator status and role
           if (isSpectator) {
             restart.classList.remove('hidden');
             if (spectatorWantsToJoin) {
@@ -659,7 +669,7 @@ function connect() {
             }
             spectatorHasClickedRestart = false;
           } else if (myRoleInfo) {
-            // Player was in the game
+            // Player was in the game - ALWAYS show "Restart Game"
             restart.classList.remove('hidden');
             restart.innerText = 'Restart Game';
             restart.disabled = false;
@@ -730,7 +740,7 @@ function connect() {
           
           exitLobbyBtn.style.display = 'block';
           
-          // NEW: Handle restart button state based on spectator status and role
+          // Handle restart button state based on spectator status and role
           if (isSpectator) {
             restart.classList.remove('hidden');
             if (spectatorWantsToJoin) {
@@ -745,7 +755,7 @@ function connect() {
             }
             spectatorHasClickedRestart = false;
           } else if (myRoleInfo) {
-            // Player was in the game
+            // Player was in the game - ALWAYS show "Restart Game"
             restart.classList.remove('hidden');
             restart.innerText = 'Restart Game';
             restart.disabled = false;
@@ -781,7 +791,7 @@ function connect() {
               restart.style.opacity = '1';
             }
           } else {
-            // Check if player has a role (was in the game)
+            // Player restart update
             if (d.playerRole) {
               // Player was in the game
               if (hasClickedRestart) {
@@ -795,9 +805,15 @@ function connect() {
               }
             } else {
               // New player (joined during results)
-              restart.innerText = 'Join Next Game';
-              restart.disabled = false;
-              restart.style.opacity = '1';
+              if (hasClickedRestart) {
+                restart.innerText = `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
+                restart.disabled = true;
+                restart.style.opacity = '0.7';
+              } else {
+                restart.innerText = 'Join Next Game';
+                restart.disabled = false;
+                restart.style.opacity = '1';
+              }
             }
           }
         }
@@ -907,7 +923,6 @@ restart.onclick = () => {
       restart.style.opacity = '0.7';
     }
   } else {
-    // Check if we should show "Join Next Game" (for new players) or "Restart Game" (for players in game)
     if (restart.innerText === 'Join Next Game') {
       // New player joining during results
       hasClickedRestart = true;
