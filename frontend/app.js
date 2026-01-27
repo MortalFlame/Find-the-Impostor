@@ -58,12 +58,17 @@ let connectionLatency = 0;
 let connectionStable = true;
 let connectionState = 'disconnected';
 
-// NEW: Reconnection timers (not booleans)
+// NEW: Timer animation variables
+let timerAnimationFrame = null;
+let currentTurnEndsAt = null;
+let isMyTurn = false;
+
+// Reconnection timers
 let reconnectTimer = null;
 let connectTimeout = null;
 let visibilityReconnectTimer = null;
 
-// NEW: Server restart detection
+// Server restart detection
 let lastServerId = localStorage.getItem('lastServerId');
 
 const DEBUG_MODE = false;
@@ -143,69 +148,80 @@ function showConnectionWarning(message) {
   }, 5000);
 }
 
-function updateTimerColor(timeLeft) {
+// NEW: Absolute-time timer functions
+function getRemainingTimeMs() {
+  if (!currentTurnEndsAt) return 0;
+  const now = Date.now();
+  return Math.max(0, currentTurnEndsAt - now);
+}
+
+function updateTimerColor(timeLeftSeconds) {
   timerProgress.classList.remove('green', 'yellow', 'orange', 'red');
   
-  if (timeLeft > 20) {
+  if (timeLeftSeconds > 20) {
     timerProgress.classList.add('green');
-  } else if (timeLeft > 15) {
+  } else if (timeLeftSeconds > 15) {
     timerProgress.classList.add('yellow');
-  } else if (timeLeft > 5) {
+  } else if (timeLeftSeconds > 5) {
     timerProgress.classList.add('orange');
   } else {
     timerProgress.classList.add('red');
   }
 }
 
-function startTurnTimer(seconds) {
-  if (turnTimer) clearInterval(turnTimer);
+function startTurnTimerAnimation(turnEndsAt) {
+  stopTurnTimerAnimation();
   
-  let timeLeft = seconds;
-  currentTurnTime = seconds;
+  currentTurnEndsAt = turnEndsAt;
+  
+  if (!isMyTurn) {
+    turnTimerEl.classList.add('hidden');
+    return;
+  }
   
   turnTimerEl.classList.remove('hidden');
   
-  const circumference = 2 * Math.PI * 18;
-  
-  updateTimerDisplay(timeLeft, circumference);
-  
-  turnTimer = setInterval(() => {
-    timeLeft--;
+  function animateTimer() {
+    const remainingMs = getRemainingTimeMs();
+    const timeLeftSeconds = Math.ceil(remainingMs / 1000);
     
-    if (timeLeft <= 0) {
-      clearInterval(turnTimer);
-      turnTimer = null;
+    if (remainingMs <= 0) {
+      // Time's up
+      stopTurnTimerAnimation();
       turnTimerEl.classList.add('hidden');
       if (!isSpectator && submit.disabled === false) {
         turnEl.textContent = 'Time expired! Waiting for next player...';
       }
-    } else {
-      updateTimerDisplay(timeLeft, circumference);
+      return;
     }
-  }, 1000);
+    
+    // Update circular timer
+    const circumference = 2 * Math.PI * 18;
+    const progress = (remainingMs / 30000) * 100; // 30 seconds total
+    const offset = circumference - (progress / 100) * circumference;
+    
+    updateTimerColor(timeLeftSeconds);
+    timerProgress.style.strokeDashoffset = offset;
+    
+    // Continue animation
+    timerAnimationFrame = requestAnimationFrame(animateTimer);
+  }
+  
+  // Start animation
+  timerAnimationFrame = requestAnimationFrame(animateTimer);
 }
 
-function updateTimerDisplay(timeLeft, circumference) {
-  timerText.textContent = '';
-  
-  updateTimerColor(timeLeft);
-  
-  const progress = (timeLeft / currentTurnTime) * 100;
-  
-  const offset = circumference - (progress / 100) * circumference;
-  timerProgress.style.strokeDashoffset = offset;
-  
-  timerProgress.style.display = 'none';
-  timerProgress.offsetHeight;
-  timerProgress.style.display = '';
+function stopTurnTimerAnimation() {
+  if (timerAnimationFrame) {
+    cancelAnimationFrame(timerAnimationFrame);
+    timerAnimationFrame = null;
+  }
+  currentTurnEndsAt = null;
+  turnTimerEl.classList.add('hidden');
 }
 
 function stopTurnTimer() {
-  if (turnTimer) {
-    clearInterval(turnTimer);
-    turnTimer = null;
-  }
-  turnTimerEl.classList.add('hidden');
+  stopTurnTimerAnimation();
 }
 
 function updatePlayerList(playersData, spectatorsData = []) {
@@ -258,11 +274,26 @@ function updatePlayerList(playersData, spectatorsData = []) {
   players.innerHTML = playersHtml;
 }
 
-// NEW: Force reconnect function
+// NEW: Enhanced visibility change handler for timer animation
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    // Restart timer animation if we have an active turn
+    if (currentTurnEndsAt && isMyTurn) {
+      startTurnTimerAnimation(currentTurnEndsAt);
+    }
+  } else {
+    // Pause timer animation when tab is hidden
+    if (timerAnimationFrame) {
+      cancelAnimationFrame(timerAnimationFrame);
+      timerAnimationFrame = null;
+    }
+  }
+});
+
+// Force reconnect function (unchanged)
 function forceReconnect() {
   safeLog('Forcing reconnect...');
   
-  // Clear any existing timers
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -273,7 +304,6 @@ function forceReconnect() {
     connectTimeout = null;
   }
   
-  // Close existing WebSocket if any
   if (ws) {
     try {
       ws.onopen = null;
@@ -287,15 +317,11 @@ function forceReconnect() {
     ws = null;
   }
   
-  // Reset reconnection delay
   reconnectDelay = 2000;
-  
-  // Schedule immediate reconnect
   scheduleReconnect(true);
 }
 
 function exitLobby() {
-  // Clear all timers
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -342,7 +368,7 @@ function exitLobby() {
   myPlayerName = '';
   updateConnectionStatus('disconnected');
   
-  stopTurnTimer();
+  stopTurnTimerAnimation();
   
   if (window.pingInterval) {
     clearInterval(window.pingInterval);
@@ -353,7 +379,6 @@ function exitLobby() {
 }
 
 function resetToLobbyScreen() {
-  // Clear all timers
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -386,7 +411,7 @@ function resetToLobbyScreen() {
   myPlayerName = '';
   updateConnectionStatus('disconnected');
   
-  stopTurnTimer();
+  stopTurnTimerAnimation();
   
   if (window.pingInterval) {
     clearInterval(window.pingInterval);
@@ -395,7 +420,6 @@ function resetToLobbyScreen() {
 }
 
 function joinAsPlayer(isReconnect = false) {
-  // Only validate nickname for fresh joins, not reconnects
   if (!isReconnect && !nickname.value.trim()) {
     alert('Please enter a nickname');
     return;
@@ -420,7 +444,6 @@ function joinAsSpectator() {
   connect();
 }
 
-// NEW: Schedule reconnect with backoff and jitter
 function scheduleReconnect(immediate = false) {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -440,7 +463,6 @@ function scheduleReconnect(immediate = false) {
       resetToLobbyScreen();
     }
     
-    // Exponential backoff with jitter
     reconnectDelay = Math.min(
       30000,
       reconnectDelay * 1.5 + Math.random() * 1000
@@ -449,13 +471,11 @@ function scheduleReconnect(immediate = false) {
 }
 
 function connect() {
-  // Clear any existing connect timeout
   if (connectTimeout) {
     clearTimeout(connectTimeout);
     connectTimeout = null;
   }
   
-  // Clear reconnect timer if we're actively connecting
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -481,7 +501,6 @@ function connect() {
   try {
     updateConnectionStatus('connecting', 'Connecting to server...');
     
-    // Close existing WebSocket if any
     if (ws) {
       try {
         ws.onopen = null;
@@ -498,7 +517,7 @@ function connect() {
     ws = new WebSocket(wsUrl);
     connectionAttempts++;
     
-    // NEW: Set a timeout to kill sockets stuck in CONNECTING state (Safari fix)
+    // Safari fix: Kill sockets stuck in CONNECTING state
     connectTimeout = setTimeout(() => {
       if (ws && ws.readyState === WebSocket.CONNECTING) {
         safeLog('WebSocket stuck in CONNECTING, forcing close');
@@ -559,12 +578,10 @@ function connect() {
         safeLog('Game update received:', d.type);
 
         if (d.type === 'serverHello') {
-          // Server restart detection
           if (lastServerId && lastServerId !== d.serverId) {
             showConnectionWarning('Server was restarted. Reconnecting...');
             lastServerId = d.serverId;
             localStorage.setItem('lastServerId', d.serverId);
-            // Force a fresh reconnection
             setTimeout(() => {
               forceReconnect();
             }, 1000);
@@ -716,39 +733,52 @@ function connect() {
           round1El.innerHTML = d.round1.map(formatWord).join('<br>');
           round2El.innerHTML = d.round2.map(formatWord).join('<br>');
           
-          stopTurnTimer();
+          stopTurnTimerAnimation();
           
           if (d.currentPlayer === 'Voting Phase') {
             turnEl.textContent = isSpectator ? 'Spectating - Voting Starting...' : 'Round Complete - Voting Starting...';
             submit.disabled = true;
             input.value = '';
             input.placeholder = isSpectator ? 'Spectating voting...' : 'Get ready to vote...';
+            isMyTurn = false;
+            currentTurnEndsAt = null;
           } else {
-            const isMyTurn = d.currentPlayer === myPlayerName;
+            isMyTurn = d.currentPlayer === myPlayerName;
             
             if (isSpectator) {
               turnEl.textContent = `Spectating - Turn: ${d.currentPlayer}`;
               submit.disabled = true;
               input.placeholder = `Spectating - ${d.currentPlayer}'s turn`;
+              currentTurnEndsAt = null;
             } else {
               turnEl.textContent = isMyTurn ? `Your Turn: ${d.currentPlayer}` : `Turn: ${d.currentPlayer}`;
               submit.disabled = !isMyTurn;
               input.placeholder = isMyTurn ? 'Your word (30s)' : `Waiting for ${d.currentPlayer}...`;
               
-              if (isMyTurn && d.timeRemaining) {
-                startTurnTimer(d.timeRemaining);
+              // NEW: Use absolute time for timer animation
+              if (d.turnEndsAt) {
+                currentTurnEndsAt = d.turnEndsAt;
+                if (isMyTurn) {
+                  startTurnTimerAnimation(currentTurnEndsAt);
+                }
+              } else if (isMyTurn && d.timeRemaining) {
+                // Fallback for backward compatibility
+                currentTurnEndsAt = Date.now() + (d.timeRemaining * 1000);
+                startTurnTimerAnimation(currentTurnEndsAt);
               }
             }
           }
         }
 
         if (d.type === 'startVoting') {
-          stopTurnTimer();
+          stopTurnTimerAnimation();
           
           turnEl.textContent = isSpectator ? 'Spectating - Vote for the Impostor!' : 'Vote for the Impostor!';
           input.value = '';
           input.placeholder = isSpectator ? 'Spectating votes...' : 'Voting in progress...';
           submit.disabled = true;
+          isMyTurn = false;
+          currentTurnEndsAt = null;
           
           if (isSpectator || d.isSpectator) {
             voting.innerHTML = '<h3>Spectating Votes</h3>' +
@@ -763,7 +793,9 @@ function connect() {
         }
 
         if (d.type === 'gameEndEarly') {
-          stopTurnTimer();
+          stopTurnTimerAnimation();
+          isMyTurn = false;
+          currentTurnEndsAt = null;
           
           const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
           let reasonText = '';
@@ -834,7 +866,9 @@ function connect() {
         }
 
         if (d.type === 'gameEnd') {
-          stopTurnTimer();
+          stopTurnTimerAnimation();
+          isMyTurn = false;
+          currentTurnEndsAt = null;
           
           const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
           
@@ -995,7 +1029,7 @@ function connect() {
         window.pingInterval = null;
       }
       
-      stopTurnTimer();
+      stopTurnTimerAnimation();
       
       if (event.code === 1000 || event.code === 1001) {
         updateConnectionStatus('disconnected', 'Disconnected');
@@ -1009,7 +1043,6 @@ function connect() {
         updateConnectionStatus('disconnected', 'Connection lost');
       }
       
-      // Schedule reconnection
       scheduleReconnect();
     };
   } catch (error) {
@@ -1106,20 +1139,22 @@ input.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isSpectator) submit.click();
 });
 
-// NEW: Enhanced visibility change handler for Safari/Android
+let hiddenTime = null;
+let pageHidden = false;
+
+// Enhanced visibility change handler
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    pageHidden = true;
+    hiddenTime = Date.now();
     safeLog('Page hidden - Safari may suspend WebSocket');
     
-    // Clear any pending visibility reconnect timer
     if (visibilityReconnectTimer) {
       clearTimeout(visibilityReconnectTimer);
       visibilityReconnectTimer = null;
     }
     
-    // Schedule a check for when we come back
     visibilityReconnectTimer = setTimeout(() => {
-      // If we're still hidden after 10 seconds, Safari has likely suspended us
       if (document.hidden) {
         safeLog('Page still hidden after 10s, preparing for reconnect');
       }
@@ -1127,24 +1162,21 @@ document.addEventListener('visibilitychange', () => {
     
   } else {
     safeLog('Page visible - checking connection');
+    pageHidden = false;
     
-    // Clear the visibility timer
     if (visibilityReconnectTimer) {
       clearTimeout(visibilityReconnectTimer);
       visibilityReconnectTimer = null;
     }
     
-    // If we don't have a connection or it's not open, force reconnect
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       safeLog('Page visible but no active WebSocket, forcing reconnect');
       updateConnectionStatus('connecting', 'Page resumed, reconnecting...');
       
-      // Small delay to ensure page is fully active
       setTimeout(() => {
         forceReconnect();
       }, 500);
     } else {
-      // Send a ping to check connection
       lastPingTime = Date.now();
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
@@ -1158,7 +1190,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// NEW: Page lifecycle events for Android/Chrome
+// Page lifecycle events for Android/Chrome
 window.addEventListener('pageshow', (e) => {
   if (e.persisted) {
     safeLog('Page restored from bfcache, forcing reconnect');
@@ -1168,7 +1200,7 @@ window.addEventListener('pageshow', (e) => {
   }
 });
 
-// NEW: Network online event for Android network switches
+// Network online event for Android network switches
 window.addEventListener('online', () => {
   safeLog('Network came online, checking connection');
   if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1178,21 +1210,17 @@ window.addEventListener('online', () => {
   }
 });
 
-// NEW: Periodic connection health check
+// Periodic connection health check
 setInterval(() => {
-  // Only run if we're in a game and think we're connected
   if (gameCard && !gameCard.classList.contains('hidden')) {
-    // If we have a WebSocket but it's not OPEN, force reconnect
     if (ws && ws.readyState !== WebSocket.OPEN) {
       safeLog('Periodic check: WebSocket not open, forcing reconnect');
       forceReconnect();
     }
-    // If we have no WebSocket at all, reconnect
     else if (!ws) {
       safeLog('Periodic check: No WebSocket, forcing reconnect');
       forceReconnect();
     }
-    // If we haven't received a pong in a while, reconnect
     else if (lastPingTime > 0 && (Date.now() - lastPingTime > 60000)) {
       safeLog('Periodic check: No pong in 60s, forcing reconnect');
       forceReconnect();
