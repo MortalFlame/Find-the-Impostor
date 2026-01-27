@@ -234,9 +234,9 @@ function startGame(lobby) {
   startTurnTimer(lobby);
 }
 
-// NEW: Calculate turn end time for consistent timing
-function getTurnEndTime() {
-  return Date.now() + 30000; // 30 seconds from now
+// NEW: Store turnEndsAt once per turn
+function setTurnEndTime(lobby) {
+  lobby.turnEndsAt = Date.now() + 30000; // Store once per turn
 }
 
 function startTurnTimer(lobby) {
@@ -250,8 +250,8 @@ function startTurnTimer(lobby) {
   const currentPlayer = lobby.players[lobby.turn];
   if (!currentPlayer) return;
   
-  // Calculate turn end time
-  const turnEndsAt = getTurnEndTime();
+  // Store the absolute turn end time
+  setTurnEndTime(lobby);
   
   lobby.turnTimeout = {
     playerId: currentPlayer.id,
@@ -269,15 +269,14 @@ function startTurnTimer(lobby) {
     }, 30000)
   };
   
-  // UPDATED: Send turn end timestamp to clients
+  // UPDATED: Use stored turnEndsAt, not recalculated
   broadcast(lobby, {
     type: 'turnUpdate',
     phase: lobby.phase,
     round1: lobby.round1,
     round2: lobby.round2,
     currentPlayer: currentPlayer.name,
-    timeRemaining: 30,
-    turnEndsAt: turnEndsAt  // NEW: Absolute end time for client timers
+    turnEndsAt: lobby.turnEndsAt  // Use stored absolute time
   });
 }
 
@@ -301,9 +300,8 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
       round1: lobby.round1,
       round2: lobby.round2,
       currentPlayer: currentPlayer.name,
-      timeRemaining: 30,
       timeoutOccurred: true,
-      turnEndsAt: getTurnEndTime() // NEW: Send new turn end time
+      turnEndsAt: lobby.turnEndsAt  // Use existing turnEndsAt
     });
   }
   
@@ -343,8 +341,7 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
         round1: lobby.round1,
         round2: lobby.round2,
         currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
-        timeRemaining: 30,
-        turnEndsAt: getTurnEndTime() // NEW: Send turn end time for next round
+        turnEndsAt: lobby.turnEndsAt  // Use stored time
       });
       
       startTurnTimer(lobby);
@@ -531,9 +528,10 @@ wss.on('connection', (ws, req) => {
             owner: msg.playerId,
             createdAt: Date.now(),
             turnTimeout: null,
+            turnEndsAt: null,  // Initialize turnEndsAt
             restartReady: [],
             spectatorsWantingToJoin: [],
-            lastTimeBelowThreePlayers: null // NEW: Initialize grace period tracker
+            lastTimeBelowThreePlayers: null
           }; 
           console.log(`Created new lobby: ${lobbyId}`);
         }
@@ -564,21 +562,16 @@ wss.on('connection', (ws, req) => {
                 }));
                 
                 if (lobby.phase === 'round1' || lobby.phase === 'round2') {
-                  // Get current turn info
+                  // Get current turn info with stored turnEndsAt
                   const currentPlayer = lobby.players[lobby.turn];
                   if (currentPlayer) {
-                    // Calculate remaining time for this turn
-                    const turnEndsAt = lobby.turnTimeout?.playerId === currentPlayer.id ? 
-                      getTurnEndTime() - (30000 - (Date.now() - (lobby.turnStartTime || Date.now()))) :
-                      getTurnEndTime();
-                    
                     ws.send(JSON.stringify({
                       type: 'turnUpdate',
                       phase: lobby.phase,
                       round1: lobby.round1,
                       round2: lobby.round2,
                       currentPlayer: currentPlayer.name,
-                      turnEndsAt: turnEndsAt
+                      turnEndsAt: lobby.turnEndsAt  // Use stored time
                     }));
                     
                     if (currentPlayer.id === player.id) {
@@ -767,8 +760,7 @@ wss.on('connection', (ws, req) => {
             round1: lobby.round1,
             round2: lobby.round2,
             currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
-            timeRemaining: 30,
-            turnEndsAt: getTurnEndTime()
+            turnEndsAt: lobby.turnEndsAt  // Use stored time
           });
           
           startTurnTimer(lobby);
@@ -849,6 +841,7 @@ wss.on('connection', (ws, req) => {
           lobby.restartReady = [];
           lobby.spectatorsWantingToJoin = [];
           lobby.lastTimeBelowThreePlayers = null;
+          lobby.turnEndsAt = null; // Clear turn end time
           
           if (lobby.turnTimeout?.timer) {
             clearTimeout(lobby.turnTimeout.timer);
@@ -928,26 +921,8 @@ wss.on('connection', (ws, req) => {
       const wasGameInProgress = (lobby.phase !== 'lobby' && lobby.phase !== 'results');
       const playerWasImpostor = player.role === 'impostor';
       
-      if ((lobby.phase === 'round1' || lobby.phase === 'round2') && 
-          lobby.players[lobby.turn]?.id === player.id) {
-        
-        setTimeout(() => {
-          if (player.ws?.readyState !== 1 && 
-              lobby.phase !== 'voting' && 
-              lobby.phase !== 'results' &&
-              lobby.players[lobby.turn]?.id === player.id) {
-            console.log(`Player ${player.name} disconnected during turn, skipping...`);
-            
-            // Clear any existing turnTimeout before skipping
-            if (lobby.turnTimeout?.timer) {
-              clearTimeout(lobby.turnTimeout.timer);
-              lobby.turnTimeout = null;
-            }
-            
-            skipCurrentPlayer(lobby, true);
-          }
-        }, 30000);
-      }
+      // FIXED: Remove duplicate skip timeout - rely on existing turnTimeout
+      // No setTimeout needed here
       
       if (wasGameInProgress) {
         if (playerWasImpostor) {
@@ -1176,18 +1151,16 @@ wss.on('connection', (ws, req) => {
           }));
           
           if (lobby.phase === 'round1' || lobby.phase === 'round2') {
-            // Get current turn info with turnEndsAt
+            // Get current turn info with stored turnEndsAt
             const currentPlayer = lobby.players[lobby.turn];
             if (currentPlayer) {
-              const turnEndsAt = getTurnEndTime();
-              
               ws.send(JSON.stringify({
                 type: 'turnUpdate',
                 phase: lobby.phase,
                 round1: lobby.round1,
                 round2: lobby.round2,
                 currentPlayer: currentPlayer.name,
-                turnEndsAt: turnEndsAt,
+                turnEndsAt: lobby.turnEndsAt,
                 isSpectator: roleToSend === 'spectator'
               }));
             }
