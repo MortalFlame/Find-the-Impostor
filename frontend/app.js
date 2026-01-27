@@ -40,7 +40,6 @@ if (!playerId) {
 }
 
 let isSpectator = false;
-let isReconnecting = false;
 let currentLobbyId = null;
 let joinType = 'joinLobby';
 let connectionAttempts = 0;
@@ -58,6 +57,11 @@ let lastPingTime = 0;
 let connectionLatency = 0;
 let connectionStable = true;
 let connectionState = 'disconnected';
+
+// NEW: Reconnection timers (not booleans)
+let reconnectTimer = null;
+let connectTimeout = null;
+let visibilityReconnectTimer = null;
 
 // NEW: Server restart detection
 let lastServerId = localStorage.getItem('lastServerId');
@@ -254,7 +258,59 @@ function updatePlayerList(playersData, spectatorsData = []) {
   players.innerHTML = playersHtml;
 }
 
+// NEW: Force reconnect function
+function forceReconnect() {
+  safeLog('Forcing reconnect...');
+  
+  // Clear any existing timers
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+  
+  // Close existing WebSocket if any
+  if (ws) {
+    try {
+      ws.onopen = null;
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.close();
+    } catch (err) {
+      // Ignore
+    }
+    ws = null;
+  }
+  
+  // Reset reconnection delay
+  reconnectDelay = 2000;
+  
+  // Schedule immediate reconnect
+  scheduleReconnect(true);
+}
+
 function exitLobby() {
+  // Clear all timers
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+  
+  if (visibilityReconnectTimer) {
+    clearTimeout(visibilityReconnectTimer);
+    visibilityReconnectTimer = null;
+  }
+  
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
       ws.send(JSON.stringify({ type: 'exitLobby' }));
@@ -280,7 +336,6 @@ function exitLobby() {
   
   isSpectator = false;
   currentLobbyId = null;
-  isReconnecting = false;
   connectionAttempts = 0;
   spectatorWantsToJoin = false;
   spectatorHasClickedRestart = false;
@@ -298,6 +353,22 @@ function exitLobby() {
 }
 
 function resetToLobbyScreen() {
+  // Clear all timers
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+  
+  if (visibilityReconnectTimer) {
+    clearTimeout(visibilityReconnectTimer);
+    visibilityReconnectTimer = null;
+  }
+  
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
   gameHeader.classList.add('hidden');
@@ -309,7 +380,6 @@ function resetToLobbyScreen() {
   
   isSpectator = false;
   currentLobbyId = null;
-  isReconnecting = false;
   connectionAttempts = 0;
   spectatorWantsToJoin = false;
   spectatorHasClickedRestart = false;
@@ -325,9 +395,7 @@ function resetToLobbyScreen() {
 }
 
 function joinAsPlayer(isReconnect = false) {
-  if (isReconnecting) return;
-  
-  // NEW: Only validate nickname for fresh joins, not reconnects
+  // Only validate nickname for fresh joins, not reconnects
   if (!isReconnect && !nickname.value.trim()) {
     alert('Please enter a nickname');
     return;
@@ -343,7 +411,6 @@ function joinAsPlayer(isReconnect = false) {
 }
 
 function joinAsSpectator() {
-  if (isReconnecting) return;
   isSpectator = true;
   spectatorWantsToJoin = false;
   spectatorHasClickedRestart = false;
@@ -353,9 +420,49 @@ function joinAsSpectator() {
   connect();
 }
 
+// NEW: Schedule reconnect with backoff and jitter
+function scheduleReconnect(immediate = false) {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  const delay = immediate ? 0 : reconnectDelay;
+  
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    
+    if (isSpectator && currentLobbyId) {
+      joinAsSpectator();
+    } else if (currentLobbyId) {
+      joinAsPlayer(true);
+    } else {
+      resetToLobbyScreen();
+    }
+    
+    // Exponential backoff with jitter
+    reconnectDelay = Math.min(
+      30000,
+      reconnectDelay * 1.5 + Math.random() * 1000
+    );
+  }, delay);
+}
+
 function connect() {
-  if (isReconnecting && connectionAttempts >= maxConnectionAttempts) {
-    safeLog('Max reconnection attempts reached');
+  // Clear any existing connect timeout
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+  
+  // Clear reconnect timer if we're actively connecting
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  if (connectionAttempts >= maxConnectionAttempts) {
+    safeLog('Max connection attempts reached');
     showConnectionWarning('Connection failed. Please refresh the page.');
     resetToLobbyScreen();
     return;
@@ -374,22 +481,44 @@ function connect() {
   try {
     updateConnectionStatus('connecting', 'Connecting to server...');
     
-    if (ws && ws.readyState !== WebSocket.CLOSED) {
+    // Close existing WebSocket if any
+    if (ws) {
       try {
-        ws.close(1000, 'Reconnecting');
+        ws.onopen = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        ws.close();
       } catch (err) {
         // Ignore
       }
+      ws = null;
     }
     
     ws = new WebSocket(wsUrl);
     connectionAttempts++;
     
+    // NEW: Set a timeout to kill sockets stuck in CONNECTING state (Safari fix)
+    connectTimeout = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.CONNECTING) {
+        safeLog('WebSocket stuck in CONNECTING, forcing close');
+        try {
+          ws.close();
+        } catch (err) {
+          // Ignore
+        }
+      }
+    }, 5000);
+    
     ws.onopen = () => {
       safeLog('Game connection established');
+      if (connectTimeout) {
+        clearTimeout(connectTimeout);
+        connectTimeout = null;
+      }
+      
       connectionAttempts = 0;
       reconnectDelay = 2000;
-      isReconnecting = false;
       hasShownConnectionWarning = false;
       updateConnectionStatus('connected');
       
@@ -430,21 +559,15 @@ function connect() {
         safeLog('Game update received:', d.type);
 
         if (d.type === 'serverHello') {
-          // NEW: Server restart detection
+          // Server restart detection
           if (lastServerId && lastServerId !== d.serverId) {
             showConnectionWarning('Server was restarted. Reconnecting...');
             lastServerId = d.serverId;
             localStorage.setItem('lastServerId', d.serverId);
             // Force a fresh reconnection
-            if (currentLobbyId) {
-              setTimeout(() => {
-                if (isSpectator) {
-                  joinAsSpectator();
-                } else {
-                  joinAsPlayer(true); // Pass true for reconnect
-                }
-              }, 1000);
-            }
+            setTimeout(() => {
+              forceReconnect();
+            }, 1000);
             return;
           }
           lastServerId = d.serverId;
@@ -464,9 +587,7 @@ function connect() {
         }
 
         if (d.type === 'error') {
-          if (!isReconnecting) {
-            alert(d.message);
-          }
+          alert(d.message);
           return;
         }
 
@@ -864,6 +985,11 @@ function connect() {
     ws.onclose = (event) => {
       safeLog(`Connection closed (code: ${event.code}, reason: ${event.reason})`);
       
+      if (connectTimeout) {
+        clearTimeout(connectTimeout);
+        connectTimeout = null;
+      }
+      
       if (window.pingInterval) {
         clearInterval(window.pingInterval);
         window.pingInterval = null;
@@ -883,26 +1009,13 @@ function connect() {
         updateConnectionStatus('disconnected', 'Connection lost');
       }
       
-      isReconnecting = true;
-      setTimeout(() => {
-        if (isSpectator && currentLobbyId) {
-          joinAsSpectator();
-        } else if (currentLobbyId) {
-          joinAsPlayer(true); // Pass true for reconnect
-        } else {
-          resetToLobbyScreen();
-        }
-        // NEW: Better reconnection backoff with jitter
-        reconnectDelay = Math.min(
-          30000,
-          reconnectDelay * 1.5 + Math.random() * 1000
-        );
-      }, reconnectDelay);
+      // Schedule reconnection
+      scheduleReconnect();
     };
   } catch (error) {
     safeError('Failed to create WebSocket:', error);
     updateConnectionStatus('disconnected', 'Failed to connect');
-    setTimeout(() => connect(), reconnectDelay);
+    scheduleReconnect();
   }
 }
 
@@ -993,72 +1106,99 @@ input.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isSpectator) submit.click();
 });
 
-let hiddenTime = null;
-let pageHidden = false;
-
+// NEW: Enhanced visibility change handler for Safari/Android
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    pageHidden = true;
-    hiddenTime = Date.now();
-    safeLog('Page hidden - connection may be suspended');
+    safeLog('Page hidden - Safari may suspend WebSocket');
     
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    // Clear any pending visibility reconnect timer
+    if (visibilityReconnectTimer) {
+      clearTimeout(visibilityReconnectTimer);
+      visibilityReconnectTimer = null;
+    }
+    
+    // Schedule a check for when we come back
+    visibilityReconnectTimer = setTimeout(() => {
+      // If we're still hidden after 10 seconds, Safari has likely suspended us
+      if (document.hidden) {
+        safeLog('Page still hidden after 10s, preparing for reconnect');
+      }
+    }, 10000);
+    
+  } else {
+    safeLog('Page visible - checking connection');
+    
+    // Clear the visibility timer
+    if (visibilityReconnectTimer) {
+      clearTimeout(visibilityReconnectTimer);
+      visibilityReconnectTimer = null;
+    }
+    
+    // If we don't have a connection or it's not open, force reconnect
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      safeLog('Page visible but no active WebSocket, forcing reconnect');
+      updateConnectionStatus('connecting', 'Page resumed, reconnecting...');
+      
+      // Small delay to ensure page is fully active
+      setTimeout(() => {
+        forceReconnect();
+      }, 500);
+    } else {
+      // Send a ping to check connection
+      lastPingTime = Date.now();
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
       } catch (err) {
-        // Connection might be closing
-      }
-    }
-    
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      updateConnectionStatus('connecting', 'Page inactive...');
-    }
-  } else {
-    pageHidden = false;
-    const hiddenDuration = hiddenTime ? Date.now() - hiddenTime : 0;
-    safeLog(`Page visible after ${hiddenDuration}ms`);
-    
-    if (hiddenDuration > 5000) {
-      if (ws && ws.readyState !== WebSocket.OPEN) {
-        safeLog('Reconnecting after page visibility change');
-        updateConnectionStatus('connecting', 'Reconnecting...');
-        
+        safeLog('Failed to send ping after visibility change, reconnecting');
         setTimeout(() => {
-          if (isSpectator && currentLobbyId) {
-            joinAsSpectator();
-          } else if (currentLobbyId) {
-            joinAsPlayer(true);
-          }
+          forceReconnect();
         }, 500);
-      } else if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-          lastPingTime = Date.now();
-          ws.send(JSON.stringify({ type: 'ping' }));
-        } catch (err) {
-          setTimeout(() => {
-            if (isSpectator && currentLobbyId) {
-              joinAsSpectator();
-            } else if (currentLobbyId) {
-              joinAsPlayer(true);
-            }
-          }, 500);
-        }
       }
-    } else if (ws && ws.readyState === WebSocket.OPEN) {
-      updateConnectionStatus('connected');
     }
   }
 });
 
+// NEW: Page lifecycle events for Android/Chrome
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) {
+    safeLog('Page restored from bfcache, forcing reconnect');
+    setTimeout(() => {
+      forceReconnect();
+    }, 100);
+  }
+});
+
+// NEW: Network online event for Android network switches
+window.addEventListener('online', () => {
+  safeLog('Network came online, checking connection');
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    setTimeout(() => {
+      forceReconnect();
+    }, 500);
+  }
+});
+
+// NEW: Periodic connection health check
 setInterval(() => {
-  if (pageHidden && ws && ws.readyState === WebSocket.OPEN) {
-    try {
-      ws.send(JSON.stringify({ type: 'ping' }));
-    } catch (err) {
-      // Connection issue
+  // Only run if we're in a game and think we're connected
+  if (gameCard && !gameCard.classList.contains('hidden')) {
+    // If we have a WebSocket but it's not OPEN, force reconnect
+    if (ws && ws.readyState !== WebSocket.OPEN) {
+      safeLog('Periodic check: WebSocket not open, forcing reconnect');
+      forceReconnect();
+    }
+    // If we have no WebSocket at all, reconnect
+    else if (!ws) {
+      safeLog('Periodic check: No WebSocket, forcing reconnect');
+      forceReconnect();
+    }
+    // If we haven't received a pong in a while, reconnect
+    else if (lastPingTime > 0 && (Date.now() - lastPingTime > 60000)) {
+      safeLog('Periodic check: No pong in 60s, forcing reconnect');
+      forceReconnect();
     }
   }
-}, 15000);
+}, 30000);
 
 window.addEventListener('beforeunload', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
