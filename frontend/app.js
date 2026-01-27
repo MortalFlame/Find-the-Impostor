@@ -58,7 +58,7 @@ let connectionLatency = 0;
 let connectionStable = true;
 let connectionState = 'disconnected';
 
-// NEW: Timer animation variables
+// Timer animation variables
 let timerAnimationFrame = null;
 let currentTurnEndsAt = null;
 let isMyTurn = false;
@@ -148,7 +148,7 @@ function showConnectionWarning(message) {
   }, 5000);
 }
 
-// NEW: Absolute-time timer functions
+// Absolute-time timer functions
 function getRemainingTimeMs() {
   if (!currentTurnEndsAt) return 0;
   const now = Date.now();
@@ -195,9 +195,10 @@ function startTurnTimerAnimation(turnEndsAt) {
       return;
     }
     
-    // Update circular timer
+    // Update circular timer - use actual duration
     const circumference = 2 * Math.PI * 18;
-    const progress = (remainingMs / 30000) * 100; // 30 seconds total
+    const totalDuration = 30000; // Fixed 30-second turns
+    const progress = (remainingMs / totalDuration) * 100;
     const offset = circumference - (progress / 100) * circumference;
     
     updateTimerColor(timeLeftSeconds);
@@ -274,23 +275,40 @@ function updatePlayerList(playersData, spectatorsData = []) {
   players.innerHTML = playersHtml;
 }
 
-// NEW: Enhanced visibility change handler for timer animation
+// SINGLE visibility change handler (FIXED: removed duplicate)
 document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && currentTurnEndsAt && isMyTurn) {
+    startTurnTimerAnimation(currentTurnEndsAt);
+  } else if (document.hidden && timerAnimationFrame) {
+    cancelAnimationFrame(timerAnimationFrame);
+    timerAnimationFrame = null;
+  }
+  
+  // Reconnection logic for visibility changes
+  safeLog('Page visible - checking connection');
   if (!document.hidden) {
-    // Restart timer animation if we have an active turn
-    if (currentTurnEndsAt && isMyTurn) {
-      startTurnTimerAnimation(currentTurnEndsAt);
-    }
-  } else {
-    // Pause timer animation when tab is hidden
-    if (timerAnimationFrame) {
-      cancelAnimationFrame(timerAnimationFrame);
-      timerAnimationFrame = null;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      safeLog('Page visible but no active WebSocket, forcing reconnect');
+      updateConnectionStatus('connecting', 'Page resumed, reconnecting...');
+      
+      setTimeout(() => {
+        forceReconnect();
+      }, 500);
+    } else {
+      lastPingTime = Date.now();
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (err) {
+        safeLog('Failed to send ping after visibility change, reconnecting');
+        setTimeout(() => {
+          forceReconnect();
+        }, 500);
+      }
     }
   }
 });
 
-// Force reconnect function (unchanged)
+// Force reconnect function
 function forceReconnect() {
   safeLog('Forcing reconnect...');
   
@@ -755,16 +773,12 @@ function connect() {
               submit.disabled = !isMyTurn;
               input.placeholder = isMyTurn ? 'Your word (30s)' : `Waiting for ${d.currentPlayer}...`;
               
-              // NEW: Use absolute time for timer animation
+              // Use absolute time from server (turnEndsAt)
               if (d.turnEndsAt) {
                 currentTurnEndsAt = d.turnEndsAt;
                 if (isMyTurn) {
                   startTurnTimerAnimation(currentTurnEndsAt);
                 }
-              } else if (isMyTurn && d.timeRemaining) {
-                // Fallback for backward compatibility
-                currentTurnEndsAt = Date.now() + (d.timeRemaining * 1000);
-                startTurnTimerAnimation(currentTurnEndsAt);
               }
             }
           }
@@ -1137,57 +1151,6 @@ lobbyId.addEventListener('keypress', (e) => {
 
 input.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isSpectator) submit.click();
-});
-
-let hiddenTime = null;
-let pageHidden = false;
-
-// Enhanced visibility change handler
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    pageHidden = true;
-    hiddenTime = Date.now();
-    safeLog('Page hidden - Safari may suspend WebSocket');
-    
-    if (visibilityReconnectTimer) {
-      clearTimeout(visibilityReconnectTimer);
-      visibilityReconnectTimer = null;
-    }
-    
-    visibilityReconnectTimer = setTimeout(() => {
-      if (document.hidden) {
-        safeLog('Page still hidden after 10s, preparing for reconnect');
-      }
-    }, 10000);
-    
-  } else {
-    safeLog('Page visible - checking connection');
-    pageHidden = false;
-    
-    if (visibilityReconnectTimer) {
-      clearTimeout(visibilityReconnectTimer);
-      visibilityReconnectTimer = null;
-    }
-    
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      safeLog('Page visible but no active WebSocket, forcing reconnect');
-      updateConnectionStatus('connecting', 'Page resumed, reconnecting...');
-      
-      setTimeout(() => {
-        forceReconnect();
-      }, 500);
-    } else {
-      lastPingTime = Date.now();
-      try {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      } catch (err) {
-        safeLog('Failed to send ping after visibility change, reconnecting');
-        setTimeout(() => {
-          forceReconnect();
-        }, 500);
-      }
-    }
-  }
 });
 
 // Page lifecycle events for Android/Chrome
