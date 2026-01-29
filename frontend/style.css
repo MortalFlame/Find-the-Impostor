@@ -111,66 +111,96 @@ body {
   animation: blink 1.5s infinite;
 }
 
-/* FIXED: Button row styling with flexbox alignment */
+/* NUCLEAR OPTION: Bulletproof button alignment */
 .button-row {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
-  height: 44px;
+  align-items: center; /* Force center alignment */
 }
 
-/* Base button styles with flexbox for perfect alignment */
-.join-btn, .spectate-btn, #start, #submit, #restart, .exit-lobby-btn, .vote-btn, .spectator-vote-btn {
-  display: inline-flex; /* KEY FIX: Use flexbox for all buttons */
-  align-items: center;
-  justify-content: center;
+/* Base button with explicit height and flexbox */
+.button-base {
+  height: 44px !important; /* Explicit height */
+  min-height: 44px !important; /* Prevent shrinking */
+  display: inline-flex !important; /* Force flexbox */
+  align-items: center !important; /* Vertical center */
+  justify-content: center !important; /* Horizontal center */
+  line-height: 1 !important; /* Kill line-height influence */
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important; /* Consistent font stack */
   border: none;
   border-radius: 16px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.1s, box-shadow 0.1s, filter 0.1s;
-  line-height: 1; /* Normalize line-height */
   margin: 0;
   padding: 0;
+  color: #fff;
 }
 
-.join-btn, .spectate-btn, #start, #submit, #restart {
-  height: 44px;
-  color: #fff;
-  text-align: center;
+.join-btn, .spectate-btn {
+  composes: button-base; /* Use base styles */
 }
 
 .join-btn {
   flex: 3;
   min-width: 0;
   background: linear-gradient(135deg, #6a8bff, #8a6aff);
-  font-size: 16px;
-  padding: 0 16px; /* Add horizontal padding for text */
+  padding: 0 16px;
 }
 
 .spectate-btn {
   flex: 1;
   min-width: 0;
   background: linear-gradient(135deg, #9b59b6, #8e44ad);
-  padding: 0; /* No padding needed for emoji-only button */
+  padding: 0; /* No padding for emoji-only */
+  font-size: 18px; /* Control emoji size separately */
 }
 
 .spectate-icon {
-  font-size: 20px;
-  line-height: 1;
-  display: inline-block;
+  font-size: 18px;
+  line-height: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
+  width: 100% !important;
 }
 
 #start, #submit, #restart {
+  height: 44px !important;
+  min-height: 44px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
   width: 100%;
-  background: linear-gradient(135deg, #6a8bff, #8a6aff);
-  margin-top: 0;
+  border: none;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s, filter 0.1s;
+  margin: 0;
   padding: 0 16px;
+  color: #fff;
+  background: linear-gradient(135deg, #6a8bff, #8a6aff);
 }
 
 #start {
   background: linear-gradient(135deg, #27ae60, #2ecc71);
+}
+
+/* Ensure all other buttons use the same pattern */
+.exit-lobby-btn, .vote-btn, .spectator-vote-btn {
+  height: auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
 .join-btn:hover:not(:disabled),
@@ -200,12 +230,13 @@ button:disabled {
 .exit-lobby-btn {
   background: linear-gradient(135deg, #e74c3c, #c0392b);
   color: white;
+  border: none;
   border-radius: 6px;
   padding: 0 8px;
   font-size: 12px;
   font-weight: 600;
   min-width: 40px;
-  height: 26px;
+  height: 26px !important;
   margin: 0;
   flex-shrink: 0;
 }
@@ -495,7 +526,7 @@ input:disabled {
 #voting button {
   margin-top: 6px;
   background: linear-gradient(135deg, #ff5b5b, #ff8c5b);
-  height: 44px;
+  height: 44px !important;
   width: 100%;
   padding: 0 16px;
 }
@@ -512,7 +543,7 @@ input:disabled {
   color: #95a5a6;
   border: 1px solid #7f8c8d;
   cursor: not-allowed;
-  height: 44px;
+  height: 44px !important;
   padding: 0 16px;
 }
 
