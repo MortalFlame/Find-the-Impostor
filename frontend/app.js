@@ -814,7 +814,8 @@ function connect() {
           isMyTurn = false;
           currentTurnEndsAt = null;
           
-          const winnerColor = d.winner === 'Civilians' ? '#2ecc71' : '#e74c3c';
+          // FIXED: Don't show "Impostor Won" when impostor leaves
+          const winnerColor = '#f39c12'; // Orange for neutral message
           let reasonText = '';
           
           if (d.reason === 'not_enough_players') {
@@ -842,9 +843,9 @@ function connect() {
           });
           rolesHtml += '</div>';
           
-          // UPDATED: Word and hint on same line
+          // UPDATED: Word and hint on same line with proper alignment
           results.innerHTML =
-            `<h2 style="color:${winnerColor}; text-align:center">${d.winner} Won!</h2>` +
+            `<h2 style="color:${winnerColor}; text-align:center">Game Ended Early</h2>` +
             reasonText +
             `<div class="word-hint-container">
               <div><b>Word:</b> ${capitalize(d.secretWord)}</div>
@@ -929,7 +930,7 @@ function connect() {
           }
           votesHtml += '</div>';
           
-          // UPDATED: Word and hint on same line
+          // UPDATED: Word and hint on same line with proper alignment
           results.innerHTML =
             `<h2 style="color:${winnerColor}; text-align:center">${d.winner} Won!</h2>` +
             `<div class="word-hint-container">
