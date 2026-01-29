@@ -111,6 +111,40 @@ body {
   animation: blink 1.5s infinite;
 }
 
+/* Floating exit button (positioned below header) */
+.floating-exit {
+  position: fixed;
+  top: 60px; /* 50px (header height) + 10px breathing room */
+  right: 14px; /* Align with header padding */
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 40px;
+  height: 26px;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+
+.floating-exit:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ff4d4d, #e74c3c);
+  box-shadow: 0 8px 20px rgba(231, 76, 60, 0.4);
+  transform: translateY(-1px);
+}
+
+.floating-exit:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
 /* Clean button alignment */
 .button-row {
   display: flex;
@@ -199,38 +233,6 @@ button:active {
 button:disabled { 
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-/* Exit lobby button styling */
-.exit-lobby-btn {
-  margin-top: 60px;
-  background: linear-gradient(135deg, #e74c3c, #c0392b);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  padding: 0 8px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  min-width: 40px;
-  height: 26px;
-  margin: 0;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.exit-lobby-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #ff4d4d, #e74c3c);
-  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
-  transform: translateY(-1px);
-}
-
-.exit-lobby-btn:active:not(:disabled) {
-  transform: scale(0.95);
 }
 
 .player-grid {
@@ -328,18 +330,6 @@ input {
 input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-/* REMOVED the problematic #spectate rule that had margin-top: 10px */
-
-/* FIXED: Added proper margin for exit button in lobby card */
-#exitLobby {
-  margin-top: 10px;
-  background: linear-gradient(135deg, #e74c3c, #c0392b);
-}
-
-#exitLobby:hover:not(:disabled) {
-  box-shadow: 0 10px 24px rgba(231, 76, 60, 0.45);
 }
 
 .players {
