@@ -163,7 +163,8 @@ function endGameEarly(lobby, reason) {
   }
   
   const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-  const winner = (reason === 'impostor_left') ? 'Civilians' : 'Impostor';
+  // FIXED: Changed winner to 'Game Ended Early' instead of 'Impostor' or 'Civilians'
+  const winner = 'Game Ended Early';
   
   broadcast(lobby, {
     type: 'gameEndEarly',
