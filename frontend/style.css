@@ -111,33 +111,34 @@ body {
   animation: blink 1.5s infinite;
 }
 
-/* FIXED: Button row styling - Perfect alignment */
+/* FIXED: Button row styling with flexbox alignment */
 .button-row {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
-  align-items: stretch;
   height: 44px;
 }
 
-/* Base button styles for consistent alignment */
-button {
+/* Base button styles with flexbox for perfect alignment */
+.join-btn, .spectate-btn, #start, #submit, #restart, .exit-lobby-btn, .vote-btn, .spectator-vote-btn {
+  display: inline-flex; /* KEY FIX: Use flexbox for all buttons */
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 16px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.1s, box-shadow 0.1s, filter 0.1s;
+  line-height: 1; /* Normalize line-height */
   margin: 0;
   padding: 0;
-  display: block;
-  text-align: center;
 }
 
 .join-btn, .spectate-btn, #start, #submit, #restart {
   height: 44px;
-  line-height: 44px; /* This is key for vertical centering */
   color: #fff;
+  text-align: center;
 }
 
 .join-btn {
@@ -145,37 +146,27 @@ button {
   min-width: 0;
   background: linear-gradient(135deg, #6a8bff, #8a6aff);
   font-size: 16px;
-  font-weight: 600;
-  padding: 0;
-  border: none;
+  padding: 0 16px; /* Add horizontal padding for text */
 }
 
 .spectate-btn {
   flex: 1;
   min-width: 0;
   background: linear-gradient(135deg, #9b59b6, #8e44ad);
-  font-size: 20px; /* Larger font for emoji */
-  padding: 0;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: 0; /* No padding needed for emoji-only button */
 }
 
 .spectate-icon {
-  display: block;
-  line-height: 1;
   font-size: 20px;
-  transform: translateY(1px); /* Minor adjustment for emoji alignment */
+  line-height: 1;
+  display: inline-block;
 }
 
 #start, #submit, #restart {
   width: 100%;
   background: linear-gradient(135deg, #6a8bff, #8a6aff);
   margin-top: 0;
-  font-size: 16px;
-  font-weight: 600;
-  padding: 0;
+  padding: 0 16px;
 }
 
 #start {
@@ -209,21 +200,14 @@ button:disabled {
 .exit-lobby-btn {
   background: linear-gradient(135deg, #e74c3c, #c0392b);
   color: white;
-  border: none;
   border-radius: 6px;
   padding: 0 8px;
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
   min-width: 40px;
   height: 26px;
   margin: 0;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
 }
 
 .exit-lobby-btn:hover:not(:disabled) {
@@ -512,10 +496,8 @@ input:disabled {
   margin-top: 6px;
   background: linear-gradient(135deg, #ff5b5b, #ff8c5b);
   height: 44px;
-  line-height: 44px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #fff;
+  width: 100%;
+  padding: 0 16px;
 }
 
 #voting button:hover:not(:disabled) {
@@ -524,17 +506,14 @@ input:disabled {
 
 .spectator-vote-btn {
   width: 100%;
-  padding: 14px;
   margin-top: 6px;
   border-radius: 16px;
   background: linear-gradient(135deg, #34495e, #2c3e50);
   color: #95a5a6;
-  text-align: center;
-  font-size: 16px;
   border: 1px solid #7f8c8d;
   cursor: not-allowed;
   height: 44px;
-  line-height: 44px;
+  padding: 0 16px;
 }
 
 /* Results screen styles */
