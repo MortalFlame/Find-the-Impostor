@@ -111,7 +111,7 @@ body {
   animation: blink 1.5s infinite;
 }
 
-/* NUCLEAR OPTION: Bulletproof button alignment */
+/* Clean button alignment */
 .button-row {
   display: flex;
   gap: 8px;
@@ -119,7 +119,7 @@ body {
   align-items: center;
 }
 
-/* Base button with explicit height and flexbox */
+/* Base button with flexbox */
 .button-base {
   height: 44px;
   min-height: 44px;
@@ -329,6 +329,9 @@ input:disabled {
   cursor: not-allowed;
 }
 
+/* REMOVED the problematic #spectate rule that had margin-top: 10px */
+
+/* FIXED: Added proper margin for exit button in lobby card */
 #exitLobby {
   margin-top: 10px;
   background: linear-gradient(135deg, #e74c3c, #c0392b);
@@ -336,11 +339,6 @@ input:disabled {
 
 #exitLobby:hover:not(:disabled) {
   box-shadow: 0 10px 24px rgba(231, 76, 60, 0.45);
-}
-
-#spectate {
-  margin-top: 10px;
-  background: linear-gradient(135deg, #9b59b6, #8e44ad);
 }
 
 .players {
