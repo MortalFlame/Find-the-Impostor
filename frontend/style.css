@@ -111,43 +111,59 @@ body {
   animation: blink 1.5s infinite;
 }
 
-/* New button row styling */
+/* Fixed button row styling */
 .button-row {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
-  align-items: stretch; /* Make buttons stretch to same height */
+  align-items: center; /* Changed from stretch to center */
+  height: 44px;
 }
 
-.join-btn, .spectate-btn, #start, #submit, #restart {
-  height: 44px;
-  min-height: 44px;
-  padding: 0; /* Remove padding and use line-height for vertical centering */
-  border-radius: 16px;
+/* Base button styles for all buttons */
+button {
   border: none;
+  border-radius: 16px;
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
   cursor: pointer;
   transition: transform 0.1s, box-shadow 0.1s, filter 0.1s;
   display: flex;
   align-items: center;
   justify-content: center;
-  line-height: 1;
+}
+
+.join-btn, .spectate-btn, #start, #submit, #restart {
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: #fff;
 }
 
 .join-btn {
   flex: 3;
   min-width: 0;
   background: linear-gradient(135deg, #6a8bff, #8a6aff);
+  font-size: 16px;
+  line-height: 44px;
 }
 
 .spectate-btn {
   flex: 1;
   min-width: 0;
-  font-size: 20px;
   background: linear-gradient(135deg, #9b59b6, #8e44ad);
-  padding: 0; /* Ensure no extra padding */
+  padding: 0;
+  height: 44px;
+}
+
+.spectate-icon {
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
 }
 
 #start, #submit, #restart {
