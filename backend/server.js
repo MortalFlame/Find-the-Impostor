@@ -89,13 +89,44 @@ function broadcast(lobby, data) {
 }
 
 function checkGameEndConditions(lobby, lobbyId) {
-  if (lobby.phase === 'lobby' || lobby.phase === 'results' || lobby.phase === 'voting') {
+  // Don't check if game is already ending or in lobby/results
+  if (lobby.phase === 'lobby' || lobby.phase === 'results') {
     return false;
   }
   
   const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
   
-  // UPDATED: 30-second grace period for low player count
+  // Check for impostor disconnect with 30-second grace period
+  const impostor = lobby.players.find(p => p.role === 'impostor');
+  if (impostor) {
+    if (impostor.ws?.readyState !== 1) {
+      const now = Date.now();
+      
+      // If we just noticed the impostor is disconnected, record the time
+      if (!impostor.lastDisconnectTime) {
+        impostor.lastDisconnectTime = now;
+        console.log(`Impostor ${impostor.name} disconnected in lobby ${lobbyId}, starting 30s grace period`);
+        return false;
+      }
+      
+      // Check if impostor has been disconnected for more than 30 seconds
+      if (now - impostor.lastDisconnectTime > 30000) {
+        console.log(`Game in lobby ${lobbyId} ending: impostor left for >30s`);
+        endGameEarly(lobby, 'impostor_left');
+        return true;
+      }
+      
+      // Still within grace period
+      const secondsRemaining = Math.ceil((30000 - (now - impostor.lastDisconnectTime)) / 1000);
+      console.log(`Impostor ${impostor.name} disconnected for ${30 - secondsRemaining}s, ${secondsRemaining}s remaining`);
+      return false;
+    } else {
+      // Impostor is connected, reset disconnect time
+      impostor.lastDisconnectTime = null;
+    }
+  }
+  
+  // Check for low player count with 30-second grace period
   if (connectedPlayers.length < 3) {
     const now = Date.now();
     
@@ -120,19 +151,6 @@ function checkGameEndConditions(lobby, lobbyId) {
   } else {
     // We have 3+ players, reset the timer
     lobby.lastTimeBelowThreePlayers = null;
-  }
-  
-  if (lobby.phase === 'round1' || lobby.phase === 'round2') {
-    const impostor = lobby.players.find(p => p.role === 'impostor');
-    // UPDATED: 30-second grace period for impostor disconnect
-    if (impostor && impostor.ws?.readyState !== 1) {
-      const now = Date.now();
-      if (impostor.lastDisconnectTime && (now - impostor.lastDisconnectTime > 30000)) {
-        console.log(`Game in lobby ${lobbyId} ending: impostor left for >30s`);
-        endGameEarly(lobby, 'impostor_left');
-        return true;
-      }
-    }
   }
   
   return false;
@@ -193,6 +211,7 @@ function startGame(lobby) {
     player.role = i === impostorIndex ? 'impostor' : 'civilian';
     player.vote = '';
     player.lastActionTime = Date.now();
+    player.lastDisconnectTime = null; // Reset disconnect time for new game
     try {
       player.ws.send(JSON.stringify({
         type: 'gameStart',
@@ -406,21 +425,9 @@ function cleanupLobby(lobby, lobbyId) {
     return;
   }
   
-  if (hasChanges) {
+  // Check game end conditions during cleanup (every 15 seconds)
+  if (lobby.phase !== 'lobby' && lobby.phase !== 'results') {
     checkGameEndConditions(lobby, lobbyId);
-  }
-  
-  if (lobby.players.length > 0 && lobby.owner) {
-    const ownerStillConnected = lobby.players.some(p => 
-      p.id === lobby.owner && p.ws?.readyState === 1
-    );
-    if (!ownerStillConnected) {
-      const newOwner = lobby.players.find(p => p.ws?.readyState === 1);
-      if (newOwner) {
-        lobby.owner = newOwner.id;
-        hasChanges = true;
-      }
-    }
   }
   
   if (hasChanges) {
@@ -648,14 +655,7 @@ wss.on('connection', (ws, req) => {
             delete lobbies[lobbyId];
           } else {
             if (wasGameInProgress) {
-              if (playerWasImpostor) {
-                checkGameEndConditions(lobby, lobbyId);
-              } else {
-                const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-                if (connectedPlayers.length < 3) {
-                  checkGameEndConditions(lobby, lobbyId);
-                }
-              }
+              checkGameEndConditions(lobby, lobbyId);
             }
             
             broadcast(lobby, { 
@@ -919,20 +919,12 @@ wss.on('connection', (ws, req) => {
       player.lastDisconnectTime = Date.now();
       
       const wasGameInProgress = (lobby.phase !== 'lobby' && lobby.phase !== 'results');
-      const playerWasImpostor = player.role === 'impostor';
       
       // FIXED: Remove duplicate skip timeout - rely on existing turnTimeout
       // No setTimeout needed here
       
       if (wasGameInProgress) {
-        if (playerWasImpostor) {
-          checkGameEndConditions(lobby, lobbyId);
-        } else {
-          const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-          if (connectedPlayers.length < 3) {
-            checkGameEndConditions(lobby, lobbyId);
-          }
-        }
+        checkGameEndConditions(lobby, lobbyId);
       }
       
       broadcast(lobby, { 
