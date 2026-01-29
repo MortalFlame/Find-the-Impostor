@@ -561,7 +561,7 @@ input:disabled {
   overflow: hidden;
 }
 
-/* FIXED: Word-hint container - centered with equal spacing */
+/* FIXED: Word-hint container - centered with equal spacing and increased label-value spacing */
 .word-hint-container {
   display: flex;
   align-items: center;
@@ -580,17 +580,25 @@ input:disabled {
   min-width: 0;
 }
 
-/* Make word right-aligned, hint left-aligned */
+/* Make word right-aligned, hint left-aligned with increased spacing between label and value */
 .word-hint-container div:first-child {
   text-align: right;
   justify-content: flex-end;
   flex: 1;
 }
 
+.word-hint-container div:first-child b {
+  margin-right: 8px; /* Increased spacing between "Word:" and the actual word */
+}
+
 .word-hint-container div:last-child {
   text-align: left;
   justify-content: flex-start;
   flex: 1;
+}
+
+.word-hint-container div:last-child b {
+  margin-right: 8px; /* Increased spacing between "Hint:" and the actual hint */
 }
 
 .word-hint-separator {
