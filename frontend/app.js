@@ -8,7 +8,6 @@ const spectate = document.getElementById('spectate');
 const start = document.getElementById('start');
 const exitLobbyBtn = document.getElementById('exitLobby');
 const players = document.getElementById('players');
-const lobbyListContainer = document.getElementById('lobbyListContainer');
 
 const gameHeader = document.getElementById('gameHeader');
 const lobbyCodeDisplay = document.getElementById('lobbyCodeDisplay');
@@ -71,6 +70,9 @@ let visibilityReconnectTimer = null;
 
 // Server restart detection
 let lastServerId = localStorage.getItem('lastServerId');
+
+// Lobby list auto-refresh
+let lobbyListRefreshInterval = null;
 
 const DEBUG_MODE = false;
 
@@ -361,6 +363,31 @@ function refreshLobbyList() {
   }
 }
 
+// NEW: Auto-refresh lobby list every 5 seconds when on lobby screen
+function startLobbyListAutoRefresh() {
+  // Clear any existing interval first
+  if (lobbyListRefreshInterval) {
+    clearInterval(lobbyListRefreshInterval);
+    lobbyListRefreshInterval = null;
+  }
+  
+  // Start a new interval that refreshes every 5 seconds
+  lobbyListRefreshInterval = setInterval(() => {
+    // Only refresh if we're on the lobby screen (not in a game)
+    if (lobbyCard && !lobbyCard.classList.contains('hidden') && 
+        ws && ws.readyState === WebSocket.OPEN) {
+      refreshLobbyList();
+    }
+  }, 5000); // 5 seconds
+}
+
+function stopLobbyListAutoRefresh() {
+  if (lobbyListRefreshInterval) {
+    clearInterval(lobbyListRefreshInterval);
+    lobbyListRefreshInterval = null;
+  }
+}
+
 // SINGLE visibility change handler (FIXED: removed duplicate)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && currentTurnEndsAt && isMyTurn) {
@@ -426,6 +453,9 @@ function forceReconnect() {
 }
 
 function exitLobby() {
+  // NEW: Stop auto-refresh first
+  stopLobbyListAutoRefresh();
+  
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -479,12 +509,15 @@ function exitLobby() {
     window.pingInterval = null;
   }
   
-  // Refresh lobby list when exiting to lobby screen
+  safeLog('Exited lobby');
+  
+  // NEW: Refresh lobby list after exiting
   setTimeout(() => {
     refreshLobbyList();
   }, 500);
   
-  safeLog('Exited lobby');
+  // NEW: Start auto-refresh again
+  startLobbyListAutoRefresh();
 }
 
 function resetToLobbyScreen() {
@@ -531,6 +564,9 @@ function resetToLobbyScreen() {
   setTimeout(() => {
     refreshLobbyList();
   }, 500);
+  
+  // NEW: Start auto-refresh of lobby list
+  startLobbyListAutoRefresh();
 }
 
 function joinAsPlayer(isReconnect = false) {
@@ -545,6 +581,12 @@ function joinAsPlayer(isReconnect = false) {
   joinType = 'joinLobby';
   connectionAttempts = 0;
   reconnectDelay = 2000;
+  
+  // NEW: Stop auto-refresh when joining a lobby
+  if (!isReconnect) {
+    stopLobbyListAutoRefresh();
+  }
+  
   connect();
 }
 
@@ -555,6 +597,10 @@ function joinAsSpectator() {
   joinType = 'joinSpectator';
   connectionAttempts = 0;
   reconnectDelay = 2000;
+  
+  // NEW: Stop auto-refresh when joining as spectator
+  stopLobbyListAutoRefresh();
+  
   connect();
 }
 
@@ -730,6 +776,13 @@ function connect() {
 
         if (d.type === 'lobbyList') {
           updateLobbyList(d.lobbies || []);
+          
+          // NEW: Show the lobby list container
+          const lobbyListContainer = document.getElementById('lobbyListContainer');
+          if (lobbyListContainer) {
+            lobbyListContainer.style.display = 'block';
+          }
+          
           return;
         }
 
@@ -758,6 +811,9 @@ function connect() {
           if (lobbyListContainer) {
             lobbyListContainer.style.display = 'none';
           }
+          
+          // NEW: Stop auto-refresh when assigned to a lobby
+          stopLobbyListAutoRefresh();
         }
 
         if (d.type === 'lobbyUpdate') {
@@ -1328,4 +1384,5 @@ safeLog('Game client initialized');
 // Initial refresh of lobby list
 setTimeout(() => {
   refreshLobbyList();
+  startLobbyListAutoRefresh();
 }, 1000);
