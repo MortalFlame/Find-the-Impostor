@@ -519,9 +519,8 @@ function exitLobby() {
     } catch (err) {
       // Ignore close errors
     }
-    // Update join button text
-  updateJoinButtonText();
   }
+  updateJoinButtonText();
   
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
