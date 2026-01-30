@@ -336,7 +336,7 @@ function updateLobbyList(lobbies) {
     
     lobbies.forEach(lobby => {
       const totalPlayers = lobby.playerCount + lobby.spectatorCount;
-      const playerStatus = `${lobby.playerCount} players`;
+      const playerStatus = `${lobby.playerCount}`;
       
       lobbiesHtml += `
         <div class="lobby-item" data-lobby-id="${lobby.id}">
