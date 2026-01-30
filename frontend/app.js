@@ -736,11 +736,13 @@ function connect() {
     }
   }, 25000);
   
-  // FIX #2: Handle browseLobbies connection type
+  // FIX #2: Handle different connection types correctly
   if (joinType === 'browseLobbies') {
-    // Just send a getLobbyList request to let server know we're connected
+    // For browsing lobbies, just send a getLobbyList request
+    // This establishes the connection without joining any lobby
     ws.send(JSON.stringify({ type: 'getLobbyList' }));
   } else if (joinType === 'joinSpectator') {
+    // Joining as spectator
     ws.send(JSON.stringify({
       type: 'joinSpectator',
       name: nickname.value.trim(),
@@ -748,6 +750,7 @@ function connect() {
       playerId
     }));
   } else {
+    // Default: joining as player (host or regular player)
     ws.send(JSON.stringify({
       type: 'joinLobby',
       name: nickname.value.trim(),
@@ -755,7 +758,7 @@ function connect() {
       playerId
     }));
   }
-  };
+};
   
 
     ws.onmessage = (e) => {
