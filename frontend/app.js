@@ -828,6 +828,13 @@ function connect() {
           resetToLobbyScreen();
           return;
         }
+        
+        if (d.type === 'lobbyClosed') {
+          safeLog('Lobby closed by host:', d.message);
+          showConnectionWarning(d.message || 'Lobby was closed by the host');
+          resetToLobbyScreen();
+          return;
+        }
 
         if (d.type === 'lobbyList') {
           updateLobbyList(d.lobbies || []);
