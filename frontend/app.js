@@ -633,6 +633,8 @@ setTimeout(() => {
     connect();
   }
 }, 100);
+// Update join button text
+  updateJoinButtonText();
 }
 
 function joinAsPlayer(isReconnect = false) {
