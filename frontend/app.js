@@ -339,9 +339,12 @@ function updateLobbyList(lobbies) {
     });
     
     // Add event listener to refresh button
-    document.getElementById('refreshLobbies').addEventListener('click', () => {
-      refreshLobbyList();
-    });
+    const refreshBtn = document.getElementById('refreshLobbies');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        refreshLobbyList();
+      });
+    }
   }
 }
 
@@ -363,7 +366,7 @@ function refreshLobbyList() {
   }
 }
 
-// NEW: Auto-refresh lobby list every 5 seconds when on lobby screen
+// Auto-refresh lobby list every 5 seconds when on lobby screen
 function startLobbyListAutoRefresh() {
   // Clear any existing interval first
   if (lobbyListRefreshInterval) {
@@ -453,7 +456,7 @@ function forceReconnect() {
 }
 
 function exitLobby() {
-  // NEW: Stop auto-refresh first
+  // Stop auto-refresh first
   stopLobbyListAutoRefresh();
   
   if (reconnectTimer) {
@@ -511,12 +514,18 @@ function exitLobby() {
   
   safeLog('Exited lobby');
   
-  // NEW: Refresh lobby list after exiting
+  // FIX #2: Show the lobby list container
+  const lobbyListContainer = document.getElementById('lobbyListContainer');
+  if (lobbyListContainer) {
+    lobbyListContainer.style.display = 'block';
+  }
+  
+  // Refresh lobby list after exiting
   setTimeout(() => {
     refreshLobbyList();
   }, 500);
   
-  // NEW: Start auto-refresh again
+  // Start auto-refresh again
   startLobbyListAutoRefresh();
 }
 
@@ -560,12 +569,18 @@ function resetToLobbyScreen() {
     window.pingInterval = null;
   }
   
+  // FIX #2: Show the lobby list container
+  const lobbyListContainer = document.getElementById('lobbyListContainer');
+  if (lobbyListContainer) {
+    lobbyListContainer.style.display = 'block';
+  }
+  
   // Refresh lobby list when returning to lobby screen
   setTimeout(() => {
     refreshLobbyList();
   }, 500);
   
-  // NEW: Start auto-refresh of lobby list
+  // Start auto-refresh of lobby list
   startLobbyListAutoRefresh();
 }
 
@@ -582,10 +597,8 @@ function joinAsPlayer(isReconnect = false) {
   connectionAttempts = 0;
   reconnectDelay = 2000;
   
-  // NEW: Stop auto-refresh when joining a lobby
-  if (!isReconnect) {
-    stopLobbyListAutoRefresh();
-  }
+  // FIX #3: REMOVED stopLobbyListAutoRefresh from here
+  // We'll stop it only when we receive lobbyAssigned
   
   connect();
 }
@@ -598,8 +611,8 @@ function joinAsSpectator() {
   connectionAttempts = 0;
   reconnectDelay = 2000;
   
-  // NEW: Stop auto-refresh when joining as spectator
-  stopLobbyListAutoRefresh();
+  // FIX #3: REMOVED stopLobbyListAutoRefresh from here
+  // We'll stop it only when we receive lobbyAssigned
   
   connect();
 }
@@ -777,7 +790,7 @@ function connect() {
         if (d.type === 'lobbyList') {
           updateLobbyList(d.lobbies || []);
           
-          // NEW: Show the lobby list container
+          // Show the lobby list container
           const lobbyListContainer = document.getElementById('lobbyListContainer');
           if (lobbyListContainer) {
             lobbyListContainer.style.display = 'block';
@@ -812,7 +825,7 @@ function connect() {
             lobbyListContainer.style.display = 'none';
           }
           
-          // NEW: Stop auto-refresh when assigned to a lobby
+          // FIX #3: Stop auto-refresh when assigned to a lobby
           stopLobbyListAutoRefresh();
         }
 
@@ -1381,8 +1394,8 @@ window.addEventListener('beforeunload', () => {
 updateConnectionStatus('disconnected');
 safeLog('Game client initialized');
 
-// Initial refresh of lobby list
+// FIX #1: Start lobby auto-refresh on page load (CRITICAL)
 setTimeout(() => {
   refreshLobbyList();
   startLobbyListAutoRefresh();
-}, 1000);
+}, 500);
