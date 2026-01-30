@@ -1014,3 +1014,50 @@ input:disabled {
   border-radius: 12px;
   border: 1px dashed rgba(106, 139, 255, 0.3);
 }
+
+/* Rounds layout fix */
+.rounds-container {
+  margin-bottom: 10px;
+}
+
+.rounds {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  width: 100%;
+}
+
+.round {
+  flex: 1;
+  min-width: 0; /* Allows the flex item to shrink */
+  background: #0d111c;
+  border-radius: 14px;
+  padding: 10px;
+  font-size: 13px;
+  min-height: 120px;
+}
+
+.round h3 {
+  margin-top: 0;
+  text-align: center;
+  font-size: 15px;
+  white-space: nowrap;
+  margin-bottom: 8px;
+}
+
+#round1, #round2 {
+  max-height: 90px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+
+/* Mobile adjustments */
+@media (max-width: 380px) {
+  .rounds {
+    flex-direction: column;
+  }
+  
+  .round {
+    min-height: 100px;
+  }
+}
