@@ -21,7 +21,7 @@ const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
 let lobbies = {};
 const SERVER_ID = crypto.randomUUID();
 
-// Function to broadcast lobby list to all clients not in a lobby
+// Function to broadcast lobby list to all clients
 function broadcastLobbyList() {
   const lobbyList = Object.entries(lobbies).map(([id, lobby]) => ({
     id,
@@ -33,8 +33,9 @@ function broadcastLobbyList() {
     createdAt: lobby.createdAt
   })).filter(lobby => lobby.phase === 'lobby'); // Only show lobbies in lobby phase
 
+  // FIX #2: Send to ALL clients, not just those not in a lobby
   wss.clients.forEach(client => {
-    if (client.readyState === 1 && !client.inLobby) {
+    if (client.readyState === 1) {
       try {
         client.send(JSON.stringify({
           type: 'lobbyList',
@@ -256,6 +257,9 @@ function endGameEarly(lobby, reason) {
   lobby.restartReady = [];
   lobby.spectatorsWantingToJoin = [];
   lobby.lastTimeBelowThreePlayers = null; // Reset grace period timer
+  
+  // FIX: Broadcast lobby list when game ends early (lobby becomes visible again)
+  broadcastLobbyList();
 }
 
 function startGame(lobby) {
@@ -330,7 +334,7 @@ function startGame(lobby) {
   
   startTurnTimer(lobby);
   
-  // FIX #1: Broadcast lobby list when game starts (lobby phase changes)
+  // FIX: Broadcast lobby list when game starts (lobby phase changes)
   broadcastLobbyList();
 }
 
@@ -521,7 +525,7 @@ function cleanupLobby(lobby, lobbyId) {
       phase: lobby.phase
     });
     
-    // FIX #3: Broadcast lobby list when players leave during cleanup
+    // FIX: Broadcast lobby list when players leave during cleanup
     broadcastLobbyList();
   }
 }
@@ -648,7 +652,7 @@ wss.on('connection', (ws, req) => {
           }; 
           console.log(`Created new lobby: ${lobbyId}`);
           
-          // FIX #1: Broadcast lobby list when a lobby is created
+          // FIX: Broadcast lobby list when a lobby is created
           broadcastLobbyList();
         }
         
@@ -752,7 +756,7 @@ wss.on('connection', (ws, req) => {
               const newOwner = lobby.players.find(p => p.ws?.readyState === 1);
               if (newOwner) {
                 lobby.owner = newOwner.id;
-                // FIX #6: Update host name when owner changes
+                // Update host name when owner changes
                 const hostPlayer = lobby.players.find(p => p.id === lobby.owner);
                 if (hostPlayer) {
                   lobby.hostName = hostPlayer.name;
@@ -805,7 +809,7 @@ wss.on('connection', (ws, req) => {
           lobbyId = null;
           player = null;
           
-          // FIX #3: Broadcast updated lobby list when player exits
+          // FIX: Broadcast updated lobby list when player exits
           broadcastLobbyList();
         }
         return;
@@ -1067,7 +1071,7 @@ wss.on('connection', (ws, req) => {
         phase: lobby.phase
       });
       
-      // FIX #3: Broadcast lobby list when player disconnects
+      // FIX: Broadcast lobby list when player disconnects
       broadcastLobbyList();
     }
     
@@ -1114,8 +1118,8 @@ wss.on('connection', (ws, req) => {
         lobby.owner = msg.playerId;
       }
       
-      // FIX #2: Set the host name correctly
-      if (lobby.owner === msg.playerId) {
+      // FIX #3: Set the host name correctly
+      if (lobby.owner === msg.playerId && !lobby.hostName) {
         lobby.hostName = uniqueName;
       }
     }
@@ -1166,7 +1170,7 @@ wss.on('connection', (ws, req) => {
       phase: lobby.phase
     });
     
-    // FIX #3: Broadcast updated lobby list to clients not in a lobby
+    // FIX: Broadcast updated lobby list to all clients
     broadcastLobbyList();
   }
 
@@ -1312,7 +1316,7 @@ wss.on('connection', (ws, req) => {
       }, 100);
     }
     
-    // FIX #3: Broadcast updated lobby list to clients not in a lobby
+    // FIX: Broadcast updated lobby list to all clients
     broadcastLobbyList();
   }
 
@@ -1358,7 +1362,7 @@ wss.on('connection', (ws, req) => {
   
   // Send initial lobby list to client
   setTimeout(() => {
-    if (ws.readyState === 1 && !ws.inLobby) {
+    if (ws.readyState === 1) {
       const lobbyList = Object.entries(lobbies).map(([id, lobby]) => ({
         id,
         host: lobby.hostName || 'Unknown',
