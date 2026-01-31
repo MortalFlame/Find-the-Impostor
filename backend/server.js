@@ -33,7 +33,7 @@ function broadcastLobbyList() {
     createdAt: lobby.createdAt
   })).filter(lobby => lobby.phase === 'lobby'); // Only show lobbies in lobby phase
 
-  // FIX #2: Send to ALL clients, not just those not in a lobby
+  // Send to ALL clients so returning players see updated list
   wss.clients.forEach(client => {
     if (client.readyState === 1) {
       try {
@@ -1174,11 +1174,11 @@ wss.on('connection', (ws, req) => {
       broadcastLobbyList();
     }
     
-    // FIX #4: Mark client as no longer in a lobby
-    ws.inLobby = false;
-    
-    console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
-  });
+    // ✅ Ensure lobby list is rebroadcast when a connection closes
+  broadcastLobbyList();
+  
+  console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
+});
 
   ws.on('error', (error) => {
     console.error(`WebSocket error for ${connectionId}:`, error.message);
