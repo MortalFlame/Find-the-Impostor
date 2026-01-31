@@ -37,7 +37,7 @@ body {
   height: 100%;
 }
 
-.gameHeader .lobby-info {
+.header-content .lobby-info {
   display: flex;
   flex-direction: row;
   align-items: center;
