@@ -343,7 +343,7 @@ function updateLobbyList(lobbies) {
           <div class="lobby-info">
             <div class="lobby-code">${lobby.id}</div>
             <div class="lobby-host">
-              <span class="host-label">Host:</span>
+              
               <span class="host-name" title="${lobby.host}">${lobby.host}</span>
             </div>
             <div class="lobby-stats">
