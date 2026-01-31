@@ -915,3 +915,21 @@ input:disabled {
     min-height: 100px;
   }
 }
+
+.lobby-list-container > div:not(.no-lobbies) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  gap: 12px;
+}
+
+.lobby-list-container span {
+  line-height: 1.2;
+}
+
+.lobby-list-container button {
+  display: flex;
+  align-items: center;
+  height: fit-content;
+}
