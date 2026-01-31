@@ -780,7 +780,7 @@ input:disabled {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.lobby-info {
+.lobby-item .lobby-info {
   flex: 1;
   min-width: 0;
   padding-right: 10px;
