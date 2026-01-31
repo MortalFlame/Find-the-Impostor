@@ -7,17 +7,6 @@ const crypto = require('crypto');
 const app = express();
 app.use(cors());
 app.use(express.static('frontend'));
-// Health endpoint for Render
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    uptime: process.uptime(),
-    lobbies: Object.keys(lobbies).length,
-    players: Object.values(lobbies).reduce((sum, lobby) => 
-      sum + lobby.players.filter(p => p.ws?.readyState === 1).length, 0
-    )
-  });
-});
 
 const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, () => console.log('Server running'));
@@ -31,6 +20,18 @@ const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
 
 let lobbies = {};
 const SERVER_ID = crypto.randomUUID();
+
+// Health endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    uptime: process.uptime(),
+    lobbies: Object.keys(lobbies).length,
+    players: Object.values(lobbies).reduce((sum, lobby) => 
+      sum + lobby.players.filter(p => p.ws?.readyState === 1).length, 0
+    )
+  });
+});
 
 // Function to broadcast lobby list to all clients
 function broadcastLobbyList() {
@@ -58,6 +59,7 @@ function broadcastLobbyList() {
     }
   });
 }
+
 // Helper function to remove a player from any lobby they might be in
 function removePlayerFromAllLobbies(playerId, reason = 'Joined another lobby') {
   let removedFrom = [];
@@ -180,19 +182,35 @@ function isNameTakenInLobby(lobby, nameToCheck, excludePlayerId = null) {
     p.id !== excludePlayerId
   );
 }
-if (msg.type === 'submitWord') {
-  const currentPlayer = lobby.players[lobby.turn];
-  if (!currentPlayer || currentPlayer.id !== player.id) {
-    console.log(`Not ${player.name}'s turn (it's ${currentPlayer?.name}'s turn)`);
-    return;
-  }
 
-  if (player.ws?.readyState !== 1) {
-    console.log(`Player ${player.name} not connected`);
-    return;
+// SIMPLE: True random word selection with no repeats until all used
+function getRandomWord(lobby) {
+  if (!lobby.availableWords || lobby.availableWords.length === 0) {
+    // Start with a fresh copy of all words
+    lobby.availableWords = [...words];
+    lobby.usedWords = [];
+    
+    // Initial shuffle using Fisher-Yates algorithm
+    for (let i = lobby.availableWords.length - 1; i > 0; i--) {
+      const j = crypto.randomInt(i + 1);
+      [lobby.availableWords[i], lobby.availableWords[j]] = [lobby.availableWords[j], lobby.availableWords[i]];
+    }
+    
+    console.log(`Initialized word pool for lobby: ${lobby.availableWords.length} words`);
   }
-
-  const entry = { name: player.name, word: msg.word };
+  
+  // Pick a random word from available words
+  const randomIndex = crypto.randomInt(lobby.availableWords.length);
+  const selectedWord = lobby.availableWords[randomIndex];
+  
+  // Remove from available and add to used
+  lobby.availableWords.splice(randomIndex, 1);
+  lobby.usedWords.push(selectedWord);
+  
+  console.log(`Selected word: "${selectedWord.word}", ${lobby.availableWords.length} remaining, ${lobby.usedWords.length} used`);
+  
+  return selectedWord;
+}
 
 function makeNameUnique(baseName, existingNames, id) {
   const lowerNames = existingNames.map(n => n.toLowerCase());
@@ -939,30 +957,29 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'submitWord') {
-  const currentPlayer = lobby.players[lobby.turn];
-  if (!currentPlayer || currentPlayer.id !== player.id) {
-    console.log(`Not ${player.name}'s turn (it's ${currentPlayer?.name}'s turn)`);
-    return;
-  }
+        const currentPlayer = lobby.players[lobby.turn];
+        if (!currentPlayer || currentPlayer.id !== player.id) {
+          console.log(`Not ${player.name}'s turn (it's ${currentPlayer?.name}'s turn)`);
+          return;
+        }
 
-  if (player.ws?.readyState !== 1) {
-    console.log(`Player ${player.name} not connected`);
-    return;
-  }
+        if (player.ws?.readyState !== 1) {
+          console.log(`Player ${player.name} not connected`);
+          return;
+        }
 
-  // SANITIZE INPUT: Remove HTML tags and limit length
-  const sanitizedWord = String(msg.word)
-    .replace(/[<>]/g, '') // Remove < and >
-    .substring(0, 50)     // Limit to 50 characters
-    .trim();
+        // SANITIZE INPUT: Remove HTML tags and limit length
+        const sanitizedWord = String(msg.word)
+          .replace(/[<>]/g, '') // Remove < and >
+          .substring(0, 50)     // Limit to 50 characters
+          .trim();
 
-  if (!sanitizedWord) {
-    console.log(`Player ${player.name} submitted empty/only HTML`);
-    return;
-  }
+        if (!sanitizedWord) {
+          console.log(`Player ${player.name} submitted empty/only HTML`);
+          return;
+        }
 
-  const entry = { name: player.name, word: sanitizedWord };
-  // ... KEEP THE REST OF YOUR EXISTING CODE EXACTLY AS IS
+        const entry = { name: player.name, word: sanitizedWord };
         if (lobby.phase === 'round1') {
           lobby.round1.push(entry);
         } else if (lobby.phase === 'round2') {
@@ -1181,10 +1198,10 @@ wss.on('connection', (ws, req) => {
     }
     
     // ✅ Ensure lobby list is rebroadcast when a connection closes
-  broadcastLobbyList();
-  
-  console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
-});
+    broadcastLobbyList();
+    
+    console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
+  });
 
   ws.on('error', (error) => {
     console.error(`WebSocket error for ${connectionId}:`, error.message);
@@ -1207,10 +1224,10 @@ wss.on('connection', (ws, req) => {
       // Check if name is already taken in this lobby
       const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
       // SANITIZE: Remove HTML tags and limit length
-let uniqueName = String(msg.name)
-  .replace(/[<>]/g, '') // Remove < and >
-  .substring(0, 20)     // Limit to 20 characters
-  .trim();
+      let uniqueName = String(msg.name)
+        .replace(/[<>]/g, '') // Remove < and >
+        .substring(0, 20)     // Limit to 20 characters
+        .trim();
       
       // If name is taken, make it unique
       if (isNameTakenInLobby(lobby, uniqueName)) {
