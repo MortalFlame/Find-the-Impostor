@@ -7,6 +7,17 @@ const crypto = require('crypto');
 const app = express();
 app.use(cors());
 app.use(express.static('frontend'));
+// Health endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    uptime: process.uptime(),
+    lobbies: Object.keys(lobbies).length,
+    players: Object.values(lobbies).reduce((sum, lobby) => 
+      sum + lobby.players.filter(p => p.ws?.readyState === 1).length, 0
+    )
+  });
+});
 
 const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, () => console.log('Server running'));
