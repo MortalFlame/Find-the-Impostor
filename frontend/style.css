@@ -780,7 +780,7 @@ input:disabled {
   font-weight: 600;
   flex-shrink: 0;
   min-width: 75px;
-  text-align: right;
+  text-align: center;
 }
 
 /* FIXED: Votes section - improved arrow centering */
