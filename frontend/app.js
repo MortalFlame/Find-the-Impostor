@@ -333,19 +333,21 @@ function updateLobbyList(lobbies) {
       </div>
       <div class="lobby-list">
     `;
- lobbiesHtml += `
+    
+    lobbies.forEach(lobby => {
+      const totalPlayers = lobby.playerCount + lobby.spectatorCount;
+      const playerStatus = `${lobby.playerCount}`;
+      
+      lobbiesHtml += `
         <div class="lobby-item" data-lobby-id="${lobby.id}">
           <div class="lobby-info">
             <div class="lobby-code">${lobby.id}</div>
-            <div class="lobby-details">
-              <div class="lobby-host">
-                <span class="host-label">Host:</span>
-                <span class="host-name" title="${lobby.host}">${lobby.host}</span>
-              </div>
-              <span class="lobby-separator">•</span>
-              <div class="lobby-stats">
-                <span class="player-count">👥 ${playerStatus}</span>
-              </div>
+            <div class="lobby-host">
+              <span class="host-label">Host:</span>
+              <span class="host-name" title="${lobby.host}">${lobby.host}</span>
+            </div>
+            <div class="lobby-stats">
+              <span class="player-count">👥 ${playerStatus}</span>
             </div>
           </div>
           <button class="join-lobby-btn" data-lobby-id="${lobby.id}">
