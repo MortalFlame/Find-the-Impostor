@@ -39,6 +39,7 @@ body {
 
 .gameHeader .lobby-info {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 12px;
   flex: 1;
