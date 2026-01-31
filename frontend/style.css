@@ -764,7 +764,7 @@ input:disabled {
 .lobby-item {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   background: rgba(13, 17, 28, 0.8);
   border-radius: 12px;
   padding: 14px;
@@ -784,6 +784,11 @@ input:disabled {
   flex: 1;
   min-width: 0;
   padding-right: 10px;
+  display: flex;            /* Add this */
+  flex-direction: column;   /* Add this */
+  justify-content: center;  /* Add this */
+}
+
 }
 
 .lobby-code {
