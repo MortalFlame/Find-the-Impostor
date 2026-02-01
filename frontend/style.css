@@ -147,6 +147,8 @@ body {
 
 /* Lobby List Styles */
 .lobby-list-container {
+  min-height: 200px !important;
+  overflow: hidden;
   margin-top: 20px;
   background: rgba(13, 17, 28, 0.6);
   border-radius: 14px;
@@ -186,6 +188,10 @@ body {
 }
 
 .no-lobbies {
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   color: #95a5a6;
   font-style: italic;
