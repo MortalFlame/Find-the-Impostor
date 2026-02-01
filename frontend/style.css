@@ -147,7 +147,8 @@ body {
 
 /* Lobby List Styles */
 .lobby-list-container {
-  min-height: 140px !important;
+  min-height: 150px;
+  max-height: 220px;
   height: auto;
   overflow: hidden;
   margin-top: 20px;
@@ -168,7 +169,7 @@ body {
 
 .lobby-list-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   color: #6a8bff;
 }
 
@@ -190,7 +191,7 @@ body {
 }
 
 .no-lobbies {
-  min-height: 140px;
+  min-height: 80px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -205,7 +206,7 @@ body {
   flex-direction: column;
   gap: 10px;
   min-height: 140px;
-  max-height: 240px;
+  max-height: 150px;
   overflow-y: auto;
 }
 
