@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { WebSocketServer } = require('ws');
+const { WebSocketServer, WebSocket } = require('ws');
 const fs = require('fs');
 const crypto = require('crypto');
 
@@ -21,7 +21,169 @@ const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
 let lobbies = {};
 const SERVER_ID = crypto.randomUUID();
 
-// FIXED: True random word selection with no repeats until all used
+// Health endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    uptime: process.uptime(),
+    lobbies: Object.keys(lobbies).length,
+    players: Object.values(lobbies).reduce((sum, lobby) => 
+      sum + lobby.players.filter(p => p.ws?.readyState === 1).length, 0
+    )
+  });
+});
+
+// Function to broadcast lobby list to all clients
+function broadcastLobbyList() {
+  const lobbyList = Object.entries(lobbies).map(([id, lobby]) => ({
+    id,
+    host: lobby.hostName || 'Unknown',
+    playerCount: lobby.players.filter(p => p.ws?.readyState === 1).length,
+    spectatorCount: lobby.spectators.filter(s => s.ws?.readyState === 1).length,
+    maxPlayers: 15,
+    phase: lobby.phase,
+    createdAt: lobby.createdAt
+  })).filter(lobby => lobby.phase === 'lobby'); // Only show lobbies in lobby phase
+
+  // Send to ALL clients so returning players see updated list
+  wss.clients.forEach(client => {
+    if (client.readyState === 1) {
+      try {
+        client.send(JSON.stringify({
+          type: 'lobbyList',
+          lobbies: lobbyList
+        }));
+      } catch (err) {
+        // Ignore send errors
+      }
+    }
+  });
+}
+
+// Helper function to remove a player from any lobby they might be in
+function removePlayerFromAllLobbies(playerId, reason = 'Joined another lobby') {
+  let removedFrom = [];
+  
+  Object.keys(lobbies).forEach(lobbyId => {
+    const lobby = lobbies[lobbyId];
+    let wasRemoved = false;
+    
+    // Check in players
+    const playerIndex = lobby.players.findIndex(p => p.id === playerId);
+    if (playerIndex !== -1) {
+      const player = lobby.players[playerIndex];
+      
+      // Notify the player if connected
+      if (player.ws && player.ws.readyState === WebSocket.OPEN) {
+        try {
+          player.ws.send(JSON.stringify({ 
+            type: 'lobbyClosed', 
+            message: reason 
+          }));
+        } catch (err) {
+          // Ignore send errors
+        }
+      }
+      
+      lobby.players.splice(playerIndex, 1);
+      wasRemoved = true;
+      
+      // If the player was the owner, assign a new owner
+      if (lobby.owner === playerId) {
+        const newOwner = lobby.players.find(p => p.ws?.readyState === 1);
+        if (newOwner) {
+          lobby.owner = newOwner.id;
+          // Update host name when owner changes
+          const hostPlayer = lobby.players.find(p => p.id === lobby.owner);
+          if (hostPlayer) {
+            lobby.hostName = hostPlayer.name;
+          }
+        } else if (lobby.players.length > 0) {
+          lobby.owner = lobby.players[0].id;
+          const hostPlayer = lobby.players.find(p => p.id === lobby.owner);
+          if (hostPlayer) {
+            lobby.hostName = hostPlayer.name;
+          }
+        }
+      }
+    }
+    
+    // Check in spectators
+    const spectatorIndex = lobby.spectators.findIndex(s => s.id === playerId);
+    if (spectatorIndex !== -1) {
+      const spectator = lobby.spectators[spectatorIndex];
+      
+      // Notify the spectator if connected
+      if (spectator.ws && spectator.ws.readyState === WebSocket.OPEN) {
+        try {
+          spectator.ws.send(JSON.stringify({ 
+            type: 'lobbyClosed', 
+            message: reason 
+          }));
+        } catch (err) {
+          // Ignore send errors
+        }
+      }
+      
+      lobby.spectators.splice(spectatorIndex, 1);
+      wasRemoved = true;
+    }
+    
+    // Clean up empty lobbies
+    if (wasRemoved) {
+      removedFrom.push(lobbyId);
+      
+      if (lobby.players.length === 0 && lobby.spectators.length === 0) {
+        console.log(`Deleting empty lobby: ${lobbyId}`);
+        
+        if (lobby.turnTimeout?.timer) {
+          clearTimeout(lobby.turnTimeout.timer);
+        }
+        
+        delete lobbies[lobbyId];
+      } else {
+        // Broadcast updated lobby state
+        broadcast(lobby, { 
+          type: 'lobbyUpdate', 
+          players: lobby.players.map(p => ({ 
+            id: p.id, 
+            name: p.name, 
+            connected: p.ws?.readyState === 1 
+          })),
+          spectators: lobby.spectators.map(s => ({ 
+            id: s.id, 
+            name: s.name, 
+            connected: s.ws?.readyState === 1 
+          })),
+          owner: lobby.owner,
+          phase: lobby.phase
+        });
+      }
+    }
+  });
+  
+  if (removedFrom.length > 0) {
+    console.log(`Player ${playerId} removed from lobbies: ${removedFrom.join(', ')}`);
+    broadcastLobbyList();
+  }
+  
+  return removedFrom.length > 0;
+}
+
+// Function to check if a name is already taken in a lobby (case-insensitive)
+function isNameTakenInLobby(lobby, nameToCheck, excludePlayerId = null) {
+  const allNames = [
+    ...lobby.players.map(p => ({ name: p.name, id: p.id })),
+    ...lobby.spectators.map(s => ({ name: s.name, id: s.id }))
+  ];
+  
+  return allNames.some(p => 
+    p.name.toLowerCase() === nameToCheck.toLowerCase() && 
+    p.id !== excludePlayerId
+  );
+}
+
+// SIMPLE: True random word selection with no repeats until all used
 function getRandomWord(lobby) {
   if (!lobby.availableWords || lobby.availableWords.length === 0) {
     // Start with a fresh copy of all words
@@ -37,38 +199,7 @@ function getRandomWord(lobby) {
     console.log(`Initialized word pool for lobby: ${lobby.availableWords.length} words`);
   }
   
-  // If we're running low on available words, mix in some used ones
-  if (lobby.availableWords.length < 3 && lobby.usedWords.length > 0) {
-    console.log(`Low on words (${lobby.availableWords.length} left), adding back ${Math.ceil(lobby.usedWords.length / 2)} used words`);
-    
-    // Add back half of the used words (random selection)
-    const wordsToReadd = [];
-    const usedCopy = [...lobby.usedWords];
-    
-    // Randomly select about half of the used words to put back
-    const numToReadd = Math.ceil(lobby.usedWords.length / 2);
-    for (let i = 0; i < numToReadd && usedCopy.length > 0; i++) {
-      const randomIndex = crypto.randomInt(usedCopy.length);
-      wordsToReadd.push(usedCopy.splice(randomIndex, 1)[0]);
-    }
-    
-    lobby.availableWords.push(...wordsToReadd);
-    
-    // Remove the readded words from usedWords
-    lobby.usedWords = lobby.usedWords.filter(wordObj => 
-      !wordsToReadd.some(w => w.word === wordObj.word)
-    );
-    
-    // Shuffle the newly expanded pool
-    const combined = [...lobby.availableWords];
-    for (let i = combined.length - 1; i > 0; i--) {
-      const j = crypto.randomInt(i + 1);
-      [combined[i], combined[j]] = [combined[j], combined[i]];
-    }
-    lobby.availableWords = combined;
-  }
-  
-  // Pick a random word from available words (not just the first)
+  // Pick a random word from available words
   const randomIndex = crypto.randomInt(lobby.availableWords.length);
   const selectedWord = lobby.availableWords[randomIndex];
   
@@ -230,6 +361,9 @@ function endGameEarly(lobby, reason) {
   lobby.restartReady = [];
   lobby.spectatorsWantingToJoin = [];
   lobby.lastTimeBelowThreePlayers = null; // Reset grace period timer
+  
+  // FIX: Broadcast lobby list when game ends early (lobby becomes visible again)
+  broadcastLobbyList();
 }
 
 function startGame(lobby) {
@@ -303,6 +437,9 @@ function startGame(lobby) {
   lobby.turn = firstConnectedIndex;
   
   startTurnTimer(lobby);
+  
+  // FIX: Broadcast lobby list when game starts (lobby phase changes)
+  broadcastLobbyList();
 }
 
 // Store turnEndsAt once per turn
@@ -418,11 +555,6 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
   } else if (lobby.phase === 'round2') {
     if (lobby.round2.length >= connectedPlayers.length) {
       lobby.phase = 'voting';
-      if (lobby.turnTimeout?.timer) {
-        clearTimeout(lobby.turnTimeout.timer);
-        lobby.turnTimeout = null;
-      }
-      
       broadcast(lobby, {
         type: 'turnUpdate',
         phase: 'round2',
@@ -471,6 +603,7 @@ function cleanupLobby(lobby, lobbyId) {
   if (lobby.players.length === 0 && lobby.spectators.length === 0) {
     console.log(`Deleting empty lobby: ${lobbyId}`);
     delete lobbies[lobbyId];
+    broadcastLobbyList();
     return;
   }
   
@@ -495,6 +628,9 @@ function cleanupLobby(lobby, lobbyId) {
       owner: lobby.owner,
       phase: lobby.phase
     });
+    
+    // FIX: Broadcast lobby list when players leave during cleanup
+    broadcastLobbyList();
   }
 }
 
@@ -541,6 +677,9 @@ wss.on('connection', (ws, req) => {
   let lobbyId = null;
   let player = null;
   let connectionId = crypto.randomUUID();
+  
+  // Mark client as not in a lobby initially
+  ws.inLobby = false;
 
   const connectionTimeout = setTimeout(() => {
     if (ws.readyState === ws.OPEN) {
@@ -567,6 +706,29 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (msg.type === 'getLobbyList') {
+        // Send current lobby list to this client
+        const lobbyList = Object.entries(lobbies).map(([id, lobby]) => ({
+          id,
+          host: lobby.hostName || 'Unknown',
+          playerCount: lobby.players.filter(p => p.ws?.readyState === 1).length,
+          spectatorCount: lobby.spectators.filter(s => s.ws?.readyState === 1).length,
+          maxPlayers: 15,
+          phase: lobby.phase,
+          createdAt: lobby.createdAt
+        })).filter(lobby => lobby.phase === 'lobby');
+        
+        try {
+          ws.send(JSON.stringify({
+            type: 'lobbyList',
+            lobbies: lobbyList
+          }));
+        } catch (err) {
+          console.log('Failed to send lobby list');
+        }
+        return;
+      }
+
       // Epoch check for all messages after player is established
       if (player && ws.connectionEpoch !== player.connectionEpoch) {
         console.log(`Ignoring message from stale socket for player ${player.name}`);
@@ -576,22 +738,35 @@ wss.on('connection', (ws, req) => {
       if (msg.type === 'joinLobby') {
         lobbyId = msg.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
         
+        // Remove player from any other lobbies they might be in
+        removePlayerFromAllLobbies(msg.playerId, 'Joined another lobby');
+        
+        // If creating a new lobby (no lobbyId provided), check for existing lobby by same host
+        if (!msg.lobbyId) {
+          // Already handled by removePlayerFromAllLobbies
+          console.log(`Player ${msg.playerId} creating new lobby ${lobbyId}`);
+        }
+        
         if (!lobbies[lobbyId]) {
           lobbies[lobbyId] = { 
             players: [], 
             spectators: [],
             phase: 'lobby', 
             owner: msg.playerId,
+            hostName: null, // Will be set when host joins
             createdAt: Date.now(),
             turnTimeout: null,
-            turnEndsAt: null,  // Initialize turnEndsAt
+            turnEndsAt: null,
             restartReady: [],
             spectatorsWantingToJoin: [],
             lastTimeBelowThreePlayers: null,
-            availableWords: null, // Initialize for word randomization
-            usedWords: [] // Initialize for word randomization
+            availableWords: null,
+            usedWords: []
           }; 
-          console.log(`Created new lobby: ${lobbyId}`);
+          console.log(`Created new lobby: ${lobbyId} for player ${msg.playerId}`);
+          
+          // FIX: Broadcast lobby list when a lobby is created
+          broadcastLobbyList();
         }
         
         const lobby = lobbies[lobbyId];
@@ -620,7 +795,6 @@ wss.on('connection', (ws, req) => {
                 }));
                 
                 if (lobby.phase === 'round1' || lobby.phase === 'round2') {
-                  // Get current turn info with stored turnEndsAt
                   const currentPlayer = lobby.players[lobby.turn];
                   if (currentPlayer) {
                     ws.send(JSON.stringify({
@@ -629,7 +803,7 @@ wss.on('connection', (ws, req) => {
                       round1: lobby.round1,
                       round2: lobby.round2,
                       currentPlayer: currentPlayer.name,
-                      turnEndsAt: lobby.turnEndsAt  // Use stored time
+                      turnEndsAt: lobby.turnEndsAt
                     }));
                     
                     if (currentPlayer.id === player.id) {
@@ -674,6 +848,9 @@ wss.on('connection', (ws, req) => {
           return;
         }
         
+        // Remove player from any other lobbies they might be in
+        removePlayerFromAllLobbies(msg.playerId, 'Joined as spectator in another lobby');
+        
         return handleSpectatorJoin(ws, msg, msg.lobbyId, connectionId);
       }
 
@@ -695,8 +872,17 @@ wss.on('connection', (ws, req) => {
               const newOwner = lobby.players.find(p => p.ws?.readyState === 1);
               if (newOwner) {
                 lobby.owner = newOwner.id;
+                // Update host name when owner changes
+                const hostPlayer = lobby.players.find(p => p.id === lobby.owner);
+                if (hostPlayer) {
+                  lobby.hostName = hostPlayer.name;
+                }
               } else if (lobby.players.length > 0) {
                 lobby.owner = lobby.players[0].id;
+                const hostPlayer = lobby.players.find(p => p.id === lobby.owner);
+                if (hostPlayer) {
+                  lobby.hostName = hostPlayer.name;
+                }
               }
             }
           }
@@ -734,8 +920,8 @@ wss.on('connection', (ws, req) => {
             // Ignore
           }
           
-          lobbyId = null;
-          player = null;
+          // FIX: Broadcast updated lobby list when player exits
+          broadcastLobbyList();
         }
         return;
       }
@@ -766,6 +952,8 @@ wss.on('connection', (ws, req) => {
       if (msg.type === 'startGame' && lobby.phase === 'lobby') {
         if (lobby.owner !== player.id) return;
         startGame(lobby);
+        // Update lobby list since this lobby is no longer in lobby phase
+        broadcastLobbyList();
       }
 
       if (msg.type === 'submitWord') {
@@ -780,7 +968,18 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        const entry = { name: player.name, word: msg.word };
+        // SANITIZE INPUT: Remove HTML tags and limit length
+        const sanitizedWord = String(msg.word)
+          .replace(/[<>]/g, '') // Remove < and >
+          .substring(0, 50)     // Limit to 50 characters
+          .trim();
+
+        if (!sanitizedWord) {
+          console.log(`Player ${player.name} submitted empty/only HTML`);
+          return;
+        }
+
+        const entry = { name: player.name, word: sanitizedWord };
         if (lobby.phase === 'round1') {
           lobby.round1.push(entry);
         } else if (lobby.phase === 'round2') {
@@ -810,7 +1009,7 @@ wss.on('connection', (ws, req) => {
             round1: lobby.round1,
             round2: lobby.round2,
             currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
-            turnEndsAt: lobby.turnEndsAt  // Use stored time
+            turnEndsAt: lobby.turnEndsAt
           });
           
           startTurnTimer(lobby);
@@ -891,12 +1090,15 @@ wss.on('connection', (ws, req) => {
           lobby.restartReady = [];
           lobby.spectatorsWantingToJoin = [];
           lobby.lastTimeBelowThreePlayers = null;
-          lobby.turnEndsAt = null; // Clear turn end time
+          lobby.turnEndsAt = null;
           
           if (lobby.turnTimeout?.timer) {
             clearTimeout(lobby.turnTimeout.timer);
             lobby.turnTimeout = null;
           }
+          
+          // Update lobby list since this lobby is now in results phase
+          broadcastLobbyList();
         }
       }
 
@@ -990,7 +1192,13 @@ wss.on('connection', (ws, req) => {
         owner: lobby.owner,
         phase: lobby.phase
       });
+      
+      // FIX: Broadcast lobby list when player disconnects
+      broadcastLobbyList();
     }
+    
+    // ✅ Ensure lobby list is rebroadcast when a connection closes
+    broadcastLobbyList();
     
     console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
   });
@@ -1013,8 +1221,19 @@ wss.on('connection', (ws, req) => {
       player.connectionEpoch = (player.connectionEpoch || 0) + 1;
       ws.connectionEpoch = player.connectionEpoch;
     } else {
+      // Check if name is already taken in this lobby
       const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
-      const uniqueName = makeNameUnique(msg.name, allNames, msg.playerId);
+      // SANITIZE: Remove HTML tags and limit length
+      let uniqueName = String(msg.name)
+        .replace(/[<>]/g, '') // Remove < and >
+        .substring(0, 20)     // Limit to 20 characters
+        .trim();
+      
+      // If name is taken, make it unique
+      if (isNameTakenInLobby(lobby, uniqueName)) {
+        uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
+        console.log(`Name "${msg.name}" was taken in lobby ${targetLobbyId}, changed to "${uniqueName}"`);
+      }
       
       player = { 
         id: msg.playerId, 
@@ -1031,7 +1250,15 @@ wss.on('connection', (ws, req) => {
       if (!lobby.owner) {
         lobby.owner = msg.playerId;
       }
+      
+      // FIX #3: Set the host name correctly
+      if (lobby.owner === msg.playerId && !lobby.hostName) {
+        lobby.hostName = uniqueName;
+      }
     }
+
+    // FIX #4: Mark client as in a lobby
+    ws.inLobby = true;
 
     if (lobby.phase === 'results') {
       setTimeout(() => {
@@ -1075,6 +1302,9 @@ wss.on('connection', (ws, req) => {
       owner: lobby.owner,
       phase: lobby.phase
     });
+    
+    // FIX: Broadcast updated lobby list to all clients
+    broadcastLobbyList();
   }
 
   function handleSpectatorJoin(ws, msg, targetLobbyId, connectionId) {
@@ -1113,7 +1343,15 @@ wss.on('connection', (ws, req) => {
       } else {
         const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
         const baseName = msg.name || `Spectator-${Math.floor(Math.random() * 1000)}`;
-        const uniqueName = makeNameUnique(baseName, allNames, msg.playerId);
+        let uniqueName = baseName.trim();
+        
+        // Check if name is already taken in this lobby
+        if (isNameTakenInLobby(lobby, uniqueName)) {
+          uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
+          console.log(`Spectator name "${baseName}" was taken in lobby ${targetLobbyId}, changed to "${uniqueName}"`);
+        } else {
+          uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
+        }
         
         player = { 
           id: msg.playerId, 
@@ -1129,6 +1367,9 @@ wss.on('connection', (ws, req) => {
         lobby.spectators.push(player);
       }
     }
+
+    // FIX #4: Mark client as in a lobby
+    ws.inLobby = true;
 
     if (lobby.phase === 'results') {
       setTimeout(() => {
@@ -1191,7 +1432,6 @@ wss.on('connection', (ws, req) => {
           }));
           
           if (lobby.phase === 'round1' || lobby.phase === 'round2') {
-            // Get current turn info with stored turnEndsAt
             const currentPlayer = lobby.players[lobby.turn];
             if (currentPlayer) {
               ws.send(JSON.stringify({
@@ -1216,6 +1456,9 @@ wss.on('connection', (ws, req) => {
         }
       }, 100);
     }
+    
+    // FIX: Broadcast updated lobby list to all clients
+    broadcastLobbyList();
   }
 
   function sendRestartUpdates(lobby) {
@@ -1257,4 +1500,28 @@ wss.on('connection', (ws, req) => {
       }
     });
   }
+  
+  // Send initial lobby list to client
+  setTimeout(() => {
+    if (ws.readyState === 1) {
+      const lobbyList = Object.entries(lobbies).map(([id, lobby]) => ({
+        id,
+        host: lobby.hostName || 'Unknown',
+        playerCount: lobby.players.filter(p => p.ws?.readyState === 1).length,
+        spectatorCount: lobby.spectators.filter(s => s.ws?.readyState === 1).length,
+        maxPlayers: 15,
+        phase: lobby.phase,
+        createdAt: lobby.createdAt
+      })).filter(lobby => lobby.phase === 'lobby');
+      
+      try {
+        ws.send(JSON.stringify({
+          type: 'lobbyList',
+          lobbies: lobbyList
+        }));
+      } catch (err) {
+        console.log('Failed to send initial lobby list');
+      }
+    }
+  }, 100);
 });

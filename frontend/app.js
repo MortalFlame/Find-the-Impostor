@@ -33,6 +33,33 @@ const voting = document.getElementById('voting');
 const results = document.getElementById('results');
 const restart = document.getElementById('restart');
 
+// Function to update join button text based on lobby input
+function updateJoinButtonText() {
+  const lobbyInput = document.getElementById('lobbyId');
+  const joinButton = document.getElementById('join');
+  
+  if (lobbyInput && joinButton) {
+    if (lobbyInput.value.trim() === '') {
+      joinButton.textContent = 'Create Lobby';
+    } else {
+      joinButton.textContent = 'Join Lobby';
+    }
+  }
+}
+
+// Add event listeners for the lobby input
+document.addEventListener('DOMContentLoaded', () => {
+  const lobbyInput = document.getElementById('lobbyId');
+  if (lobbyInput) {
+    lobbyInput.addEventListener('input', updateJoinButtonText);
+    lobbyInput.addEventListener('change', updateJoinButtonText);
+    lobbyInput.addEventListener('keyup', updateJoinButtonText);
+    
+    // Initial update
+    setTimeout(updateJoinButtonText, 100);
+  }
+});
+
 let playerId = localStorage.getItem('playerId');
 if (!playerId) {
   playerId = crypto.randomUUID();
@@ -70,6 +97,9 @@ let visibilityReconnectTimer = null;
 
 // Server restart detection
 let lastServerId = localStorage.getItem('lastServerId');
+
+// Lobby list auto-refresh
+let lobbyListRefreshInterval = null;
 
 const DEBUG_MODE = false;
 
@@ -174,7 +204,7 @@ function startTurnTimerAnimation(turnEndsAt) {
   
   currentTurnEndsAt = turnEndsAt;
   
-  if (!isMyTurn) {
+  if (!isMyTurn || isSpectator) {
     turnTimerEl.classList.add('hidden');
     return;
   }
@@ -189,13 +219,11 @@ function startTurnTimerAnimation(turnEndsAt) {
       // Time's up
       stopTurnTimerAnimation();
       turnTimerEl.classList.add('hidden');
-      if (!isSpectator && submit.disabled === false) {
-        turnEl.textContent = 'Time expired! Waiting for next player...';
-      }
+      turnEl.textContent = 'Time expired! Waiting for next player...';
       return;
     }
     
-    // Update circular timer - use actual duration
+    // Update circular timer
     const circumference = 2 * Math.PI * 18;
     const totalDuration = 30000; // Fixed 30-second turns
     const progress = (remainingMs / totalDuration) * 100;
@@ -203,6 +231,9 @@ function startTurnTimerAnimation(turnEndsAt) {
     
     updateTimerColor(timeLeftSeconds);
     timerProgress.style.strokeDashoffset = offset;
+    
+    // Update timer text
+    timerText.textContent = timeLeftSeconds;
     
     // Continue animation
     timerAnimationFrame = requestAnimationFrame(animateTimer);
@@ -275,6 +306,125 @@ function updatePlayerList(playersData, spectatorsData = []) {
   players.innerHTML = playersHtml;
 }
 
+function updateLobbyList(lobbies) {
+  const lobbyListContainer = document.getElementById('lobbyListContainer');
+  if (!lobbyListContainer) return;
+  
+  // Ensure container is visible when we're browsing lobbies
+  if (lobbyCard && !lobbyCard.classList.contains('hidden')) {
+    lobbyListContainer.style.display = 'block';
+  }
+  
+  // Sort lobbies by creation date (newest first)
+  lobbies.sort((a, b) => b.createdAt - a.createdAt);
+  
+  if (lobbies.length === 0) {
+    lobbyListContainer.innerHTML = `
+      <div class="lobby-list-header">
+        <h3>Available Lobbies</h3>
+        <button id="refreshLobbies" class="refresh-btn">↻</button>
+      </div>
+      <div class="no-lobbies">No lobbies available. Create one!</div>
+    `;
+  } else {
+    let lobbiesHtml = `
+      <div class="lobby-list-header">
+        <h3>Available Lobbies (${lobbies.length})</h3>
+        <button id="refreshLobbies" class="refresh-btn">↻</button>
+      </div>
+      <div class="lobby-list">
+    `;
+    
+    lobbies.forEach(lobby => {
+      const totalPlayers = lobby.playerCount + lobby.spectatorCount;
+      const playerStatus = `${lobby.playerCount}`;
+      
+      lobbiesHtml += `
+        <div class="lobby-item" data-lobby-id="${lobby.id}">
+          <div class="lobby-info">
+            <div class="lobby-code">${lobby.id}</div>
+            <div class="lobby-host">
+              
+              <span class="host-name" title="${lobby.host}">${lobby.host}</span>
+            </div>
+            <div class="lobby-stats">
+              <span class="player-count">P: ${playerStatus}</span>
+            </div>
+          </div>
+          <button class="join-lobby-btn" data-lobby-id="${lobby.id}">
+            Join
+          </button>
+        </div>
+      `;
+    });
+    
+    lobbiesHtml += '</div>';
+    lobbyListContainer.innerHTML = lobbiesHtml;
+    
+    // Add event listeners to join buttons
+    document.querySelectorAll('.join-lobby-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const lobbyIdToJoin = e.target.getAttribute('data-lobby-id');
+        if (lobbyIdToJoin) {
+          document.getElementById('lobbyId').value = lobbyIdToJoin;
+          joinAsPlayer(false);
+        }
+      });
+    });
+    
+    // Add event listener to refresh button
+    const refreshBtn = document.getElementById('refreshLobbies');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        refreshLobbyList();
+      });
+    }
+  }
+}
+
+function getTimeAgo(timestamp) {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return 'Long ago';
+}
+
+function refreshLobbyList() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'getLobbyList' }));
+  }
+}
+
+// Auto-refresh lobby list every 5 seconds when on lobby screen
+function startLobbyListAutoRefresh() {
+  // Clear any existing interval first
+  if (lobbyListRefreshInterval) {
+    clearInterval(lobbyListRefreshInterval);
+    lobbyListRefreshInterval = null;
+  }
+  
+  // Start a new interval that refreshes every 5 seconds
+  lobbyListRefreshInterval = setInterval(() => {
+    // Only refresh if we're on the lobby screen (not in a game)
+    if (lobbyCard && !lobbyCard.classList.contains('hidden') && 
+        ws && ws.readyState === WebSocket.OPEN) {
+      refreshLobbyList();
+    }
+  }, 5000); // 5 seconds
+}
+
+function stopLobbyListAutoRefresh() {
+  if (lobbyListRefreshInterval) {
+    clearInterval(lobbyListRefreshInterval);
+    lobbyListRefreshInterval = null;
+  }
+}
+
 // SINGLE visibility change handler (FIXED: removed duplicate)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && currentTurnEndsAt && isMyTurn) {
@@ -340,6 +490,9 @@ function forceReconnect() {
 }
 
 function exitLobby() {
+  // Stop auto-refresh first
+  stopLobbyListAutoRefresh();
+  
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -368,6 +521,7 @@ function exitLobby() {
       // Ignore close errors
     }
   }
+  updateJoinButtonText();
   
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
@@ -384,6 +538,7 @@ function exitLobby() {
   spectatorWantsToJoin = false;
   spectatorHasClickedRestart = false;
   myPlayerName = '';
+  joinType = 'browseLobbies';
   updateConnectionStatus('disconnected');
   
   stopTurnTimerAnimation();
@@ -394,6 +549,28 @@ function exitLobby() {
   }
   
   safeLog('Exited lobby');
+  
+  // FIX #2: Show the lobby list container
+  const lobbyListContainer = document.getElementById('lobbyListContainer');
+  if (lobbyListContainer) {
+    lobbyListContainer.style.display = 'block';
+  }
+  
+  // Refresh lobby list after exiting
+  setTimeout(() => {
+    refreshLobbyList();
+  }, 500);
+  
+  // Start auto-refresh again
+  startLobbyListAutoRefresh();
+  
+  // Reconnect for lobby browsing
+  setTimeout(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      joinType = 'browseLobbies';
+      connect();
+    }
+  }, 300);
 }
 
 function resetToLobbyScreen() {
@@ -427,6 +604,7 @@ function resetToLobbyScreen() {
   spectatorWantsToJoin = false;
   spectatorHasClickedRestart = false;
   myPlayerName = '';
+  joinType = 'browseLobbies';
   updateConnectionStatus('disconnected');
   
   stopTurnTimerAnimation();
@@ -435,6 +613,30 @@ function resetToLobbyScreen() {
     clearInterval(window.pingInterval);
     window.pingInterval = null;
   }
+  
+  // FIX #2: Show the lobby list container
+  const lobbyListContainer = document.getElementById('lobbyListContainer');
+  if (lobbyListContainer) {
+    lobbyListContainer.style.display = 'block';
+  }
+  
+  // // Refresh lobby list when returning to lobby screen
+setTimeout(() => {
+  refreshLobbyList();
+}, 500);
+
+// Start auto-refresh of lobby list
+startLobbyListAutoRefresh();
+
+// FIX #3: Reconnect for lobby browsing if not already connected
+setTimeout(() => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    joinType = 'browseLobbies';
+    connect();
+  }
+}, 100);
+// Update join button text
+  updateJoinButtonText();
 }
 
 function joinAsPlayer(isReconnect = false) {
@@ -446,9 +648,13 @@ function joinAsPlayer(isReconnect = false) {
   isSpectator = false;
   spectatorWantsToJoin = false;
   spectatorHasClickedRestart = false;
-  joinType = 'joinLobby';
+  joinType = 'joinLobby';  // IMPORTANT: Set this before connect()
   connectionAttempts = 0;
   reconnectDelay = 2000;
+  
+  // Stop auto-refresh when joining a lobby
+  stopLobbyListAutoRefresh();
+  
   connect();
 }
 
@@ -456,9 +662,13 @@ function joinAsSpectator() {
   isSpectator = true;
   spectatorWantsToJoin = false;
   spectatorHasClickedRestart = false;
-  joinType = 'joinSpectator';
+  joinType = 'joinSpectator';  // IMPORTANT: Set this before connect()
   connectionAttempts = 0;
   reconnectDelay = 2000;
+  
+  // Stop auto-refresh when joining as spectator
+  stopLobbyListAutoRefresh();
+  
   connect();
 }
 
@@ -506,7 +716,8 @@ function connect() {
     return;
   }
 
-  if (!nickname.value.trim() && joinType !== 'joinLobby') {
+  // Only require nickname for joinLobby or joinSpectator, not for browseLobbies
+  if (!nickname.value.trim() && (joinType === 'joinLobby' || joinType === 'joinSpectator')) {
     alert('Please enter a nickname');
     return;
   }
@@ -547,48 +758,65 @@ function connect() {
       }
     }, 5000);
     
-    ws.onopen = () => {
-      safeLog('Game connection established');
-      if (connectTimeout) {
-        clearTimeout(connectTimeout);
-        connectTimeout = null;
+  ws.onopen = () => {
+  safeLog('Game connection established');
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+  
+  connectionAttempts = 0;
+  reconnectDelay = 2000;
+  hasShownConnectionWarning = false;
+  updateConnectionStatus('connected');
+  
+  // Don't show game header for lobby browsing
+  if (joinType !== 'browseLobbies') {
+    gameHeader.classList.remove('hidden');
+  }
+  
+  if (window.pingInterval) clearInterval(window.pingInterval);
+  window.pingInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      lastPingTime = Date.now();
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (err) {
+        safeError('Failed to send ping');
       }
-      
-      connectionAttempts = 0;
-      reconnectDelay = 2000;
-      hasShownConnectionWarning = false;
-      updateConnectionStatus('connected');
-      
-      gameHeader.classList.remove('hidden');
-      
-      if (window.pingInterval) clearInterval(window.pingInterval);
-      window.pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          lastPingTime = Date.now();
-          try {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          } catch (err) {
-            safeError('Failed to send ping');
-          }
-        }
-      }, 25000);
-      
-      if (joinType === 'joinSpectator') {
-        ws.send(JSON.stringify({
-          type: 'joinSpectator',
-          name: nickname.value.trim(),
-          lobbyId: lobbyId.value.trim(),
-          playerId
-        }));
-      } else {
-        ws.send(JSON.stringify({
-          type: 'joinLobby',
-          name: nickname.value.trim(),
-          lobbyId: lobbyId.value || undefined,
-          playerId
-        }));
+    }
+  }, 25000);
+  
+  // FIX #2: Handle different connection types correctly
+  setTimeout(() => {
+    if (joinType === 'browseLobbies') {
+      // For browsing lobbies, just send a getLobbyList request
+      // Wait a bit to ensure connection is fully established
+      try {
+        ws.send(JSON.stringify({ type: 'getLobbyList' }));
+      } catch (err) {
+        safeError('Failed to send getLobbyList');
       }
-    };
+    } else if (joinType === 'joinSpectator') {
+      // Joining as spectator
+      ws.send(JSON.stringify({
+        type: 'joinSpectator',
+        name: nickname.value.trim(),
+        lobbyId: lobbyId.value.trim(),
+        playerId
+      }));
+    } else {
+      // Default: joining as player (host or regular player)
+      ws.send(JSON.stringify({
+        type: 'joinLobby',
+        name: nickname.value.trim(),
+        lobbyId: lobbyId.value || undefined,
+        playerId
+      }));
+    }
+  }, 200);
+};
+  
 
     ws.onmessage = (e) => {
       try {
@@ -631,6 +859,25 @@ function connect() {
           resetToLobbyScreen();
           return;
         }
+        
+        if (d.type === 'lobbyClosed') {
+          safeLog('Lobby closed by host:', d.message);
+          showConnectionWarning(d.message || 'Lobby was closed by the host');
+          resetToLobbyScreen();
+          return;
+        }
+
+        if (d.type === 'lobbyList') {
+          updateLobbyList(d.lobbies || []);
+          
+          // Show the lobby list container
+          const lobbyListContainer = document.getElementById('lobbyListContainer');
+          if (lobbyListContainer) {
+            lobbyListContainer.style.display = 'block';
+          }
+          
+          return;
+        }
 
         if (d.type === 'lobbyAssigned') {
           lobbyId.value = d.lobbyId;
@@ -651,6 +898,15 @@ function connect() {
           
           // Show exit button in header after joining lobby
           exitLobbyBtn.style.display = 'block';
+          
+          // Hide lobby list when in a lobby
+          const lobbyListContainer = document.getElementById('lobbyListContainer');
+          if (lobbyListContainer) {
+            lobbyListContainer.style.display = 'none';
+          }
+          
+          // FIX #3: Stop auto-refresh when assigned to a lobby
+          stopLobbyListAutoRefresh();
         }
 
         if (d.type === 'lobbyUpdate') {
@@ -1217,3 +1473,21 @@ window.addEventListener('beforeunload', () => {
 
 updateConnectionStatus('disconnected');
 safeLog('Game client initialized');
+
+// FIX #1: Auto-connect for lobby browsing AND start auto-refresh
+// This runs immediately when page loads for ALL players
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    // Only connect if we're not already in a lobby/game
+    if (lobbyCard && !lobbyCard.classList.contains('hidden')) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        joinType = 'browseLobbies';
+        connect();
+      } else {
+        // Already connected, just refresh the lobby list
+        refreshLobbyList();
+      }
+      startLobbyListAutoRefresh();
+    }
+  }, 100);
+});

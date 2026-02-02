@@ -8,6 +8,11 @@
   />
   <title>Impostor</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="preload" as="image" href="images/civilian-bg.webp" fetchpriority="high">
+  <link rel="preload" as="image" href="images/impostor-bg.webp" fetchpriority="high">
+  <link rel="preload" as="image" href="images/civilian-bg.JPG" fetchpriority="high">
+  <link rel="preload" as="image" href="images/impostor-bg.JPG" fetchpriority="high">
+    
 </head>
 <body>
   <div id="gameHeader" class="game-header hidden">
@@ -26,7 +31,7 @@
   </div>
 
   <!-- Floating exit button (outside header) -->
-  <button id="exitLobby" class="floating-exit" style="display:none;">✕</button>
+  <button id="exitLobby" class="floating-exit" style="display:none;">X</button>
 
   <div class="app">
     <!-- LOBBY -->
@@ -45,6 +50,11 @@
       <button id="start" class="button-base" disabled>Start Game</button>
 
       <div id="players" class="players"></div>
+      
+      <!-- Lobby List Container -->
+      <div id="lobbyListContainer" class="lobby-list-container">
+        <div class="no-lobbies">Loading lobbies...</div>
+      </div>
     </div>
 
     <!-- GAME -->
@@ -70,14 +80,16 @@
         </div>
       </div>
 
-      <div class="rounds">
-        <div class="round">
-          <h3>Round 1</h3>
-          <div id="round1"></div>
-        </div>
-        <div class="round">
-          <h3>Round 2</h3>
-          <div id="round2"></div>
+      <div class="rounds-container">
+        <div class="rounds">
+          <div class="round">
+            <h3>Round 1</h3>
+            <div id="round1"></div>
+          </div>
+          <div class="round">
+            <h3>Round 2</h3>
+            <div id="round2"></div>
+          </div>
         </div>
       </div>
 
