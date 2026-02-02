@@ -43,8 +43,8 @@ function broadcastLobbyList() {
     maxPlayers: 15,
     phase: lobby.phase,
     createdAt: lobby.createdAt,
-    impostorGuessOption: lobby.impostorGuessOption || false // Add to lobby list
-  })).filter(lobby => lobby.phase === 'lobby'); // Only show lobbies in lobby phase
+    impostorGuessOption: lobby.impostorGuessOption || false
+  })); // Removed filter to show ALL lobbies including in-progress ones
 
   // Send to ALL clients so returning players see updated list
   wss.clients.forEach(client => {
@@ -370,7 +370,7 @@ function endGameEarly(lobby, reason) {
   
   lobby.phase = 'results';
   lobby.restartReady = [];
-  lobby.spectatorsWantingToJoin = [];
+  // FIX: Don't clear spectatorsWantingToJoin here - let them persist
   lobby.lastTimeBelowThreePlayers = null; // Reset grace period timer
   
   // FIX: Broadcast lobby list when game ends early (lobby becomes visible again)
@@ -389,7 +389,7 @@ function startGame(lobby) {
   lobby.round1 = [];
   lobby.round2 = [];
   lobby.restartReady = [];
-  lobby.spectatorsWantingToJoin = [];
+  // FIX: Don't clear spectatorsWantingToJoin when starting game - keep it for next game
   lobby.turnTimeout = null;
   lobby.impostorGuessTimeout = null;
   lobby.lastTimeBelowThreePlayers = null; // Reset grace period timer
@@ -450,7 +450,7 @@ function startGame(lobby) {
   
   startTurnTimer(lobby);
   
-  // FIX: Broadcast lobby list when game starts (lobby phase changes)
+  // FIX: Broadcast lobby list when game starts
   broadcastLobbyList();
 }
 
@@ -615,7 +615,7 @@ function startImpostorGuessTimer(lobby) {
       
       lobby.phase = 'results';
       lobby.restartReady = [];
-      lobby.spectatorsWantingToJoin = [];
+      // FIX: Don't clear spectatorsWantingToJoin here
       lobby.lastTimeBelowThreePlayers = null;
       lobby.turnEndsAt = null;
       lobby.impostorGuessTimeout = null;
@@ -773,7 +773,7 @@ wss.on('connection', (ws, req) => {
           phase: lobby.phase,
           createdAt: lobby.createdAt,
           impostorGuessOption: lobby.impostorGuessOption || false
-        })).filter(lobby => lobby.phase === 'lobby');
+        })); // Removed filter to show ALL lobbies
         
         try {
           ws.send(JSON.stringify({
@@ -892,6 +892,7 @@ wss.on('connection', (ws, req) => {
                     }));
                   }
                 } else if (lobby.phase === 'results') {
+                  // FIX: Send gameEnd to rejoining players during results
                   const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
                   const winner = connectedPlayers.length >= 3 ? 'Game Ended' : 'Game Ended Early';
                   
@@ -1221,7 +1222,7 @@ wss.on('connection', (ws, req) => {
           });
           lobby.phase = 'results';
           lobby.restartReady = [];
-          lobby.spectatorsWantingToJoin = [];
+          // FIX: Don't clear spectatorsWantingToJoin
           lobby.lastTimeBelowThreePlayers = null;
           lobby.turnEndsAt = null;
           
@@ -1266,7 +1267,7 @@ wss.on('connection', (ws, req) => {
         
         lobby.phase = 'results';
         lobby.restartReady = [];
-        lobby.spectatorsWantingToJoin = [];
+        // FIX: Don't clear spectatorsWantingToJoin
         lobby.lastTimeBelowThreePlayers = null;
         lobby.turnEndsAt = null;
         
@@ -1309,6 +1310,7 @@ wss.on('connection', (ws, req) => {
             }
           });
           
+          // FIX: Clear spectatorsWantingToJoin AFTER moving them to players
           lobby.spectatorsWantingToJoin = [];
           startGame(lobby);
         }
@@ -1556,7 +1558,7 @@ wss.on('connection', (ws, req) => {
           isSpectator: true,
           connectionId,
           lastActionTime: Date.now(),
-          wantsToJoinNextGame: false,
+          wantsToJoinNextGame: lobby.spectatorsWantingToJoin.includes(msg.playerId), // FIX: Set based on existing state
           connectionEpoch: 1
         };
         ws.connectionEpoch = 1;
@@ -1724,7 +1726,7 @@ wss.on('connection', (ws, req) => {
         phase: lobby.phase,
         createdAt: lobby.createdAt,
         impostorGuessOption: lobby.impostorGuessOption || false
-      })).filter(lobby => lobby.phase === 'lobby');
+      })); // Removed filter to show ALL lobbies
       
       try {
         ws.send(JSON.stringify({
