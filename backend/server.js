@@ -89,6 +89,12 @@ function removePlayerFromAllLobbies(playerId, reason = 'Joined another lobby') {
       lobby.players.splice(playerIndex, 1);
       wasRemoved = true;
       
+      // Remove from restartReady if present
+      const restartReadyIndex = lobby.restartReady.indexOf(playerId);
+      if (restartReadyIndex !== -1) {
+        lobby.restartReady.splice(restartReadyIndex, 1);
+      }
+      
       // If the player was the owner, assign a new owner
       if (lobby.owner === playerId) {
         const newOwner = lobby.players.find(p => p.ws?.readyState === 1);
@@ -127,12 +133,24 @@ function removePlayerFromAllLobbies(playerId, reason = 'Joined another lobby') {
       }
       
       lobby.spectators.splice(spectatorIndex, 1);
+      
+      // Remove from spectatorsWantingToJoin if present
+      const wantingIndex = lobby.spectatorsWantingToJoin.indexOf(playerId);
+      if (wantingIndex !== -1) {
+        lobby.spectatorsWantingToJoin.splice(wantingIndex, 1);
+      }
+      
       wasRemoved = true;
     }
     
     // Clean up empty lobbies
     if (wasRemoved) {
       removedFrom.push(lobbyId);
+      
+      // If player left during restart count, send restart updates
+      if (lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) {
+        sendRestartUpdates(lobby);
+      }
       
       if (lobby.players.length === 0 && lobby.spectators.length === 0) {
         console.log(`Deleting empty lobby: ${lobbyId}`);
@@ -369,7 +387,8 @@ function endGameEarly(lobby, reason) {
   });
   
   lobby.phase = 'results';
-  lobby.restartReady = [];
+  // FIX: Don't clear restartReady here - let them persist for next game
+  // lobby.restartReady = [];
   // FIX: Don't clear spectatorsWantingToJoin here - let them persist
   lobby.lastTimeBelowThreePlayers = null; // Reset grace period timer
   
@@ -388,7 +407,10 @@ function startGame(lobby) {
   lobby.turn = 0;
   lobby.round1 = [];
   lobby.round2 = [];
-  lobby.restartReady = [];
+  // FIX: Only clear restartReady for players who are still in the game
+  lobby.restartReady = lobby.restartReady.filter(id => 
+    lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
+  );
   // FIX: Don't clear spectatorsWantingToJoin when starting game - keep it for next game
   lobby.turnTimeout = null;
   lobby.impostorGuessTimeout = null;
@@ -614,7 +636,8 @@ function startImpostorGuessTimer(lobby) {
       }
       
       lobby.phase = 'results';
-      lobby.restartReady = [];
+      // FIX: Don't clear restartReady here
+      // lobby.restartReady = [];
       // FIX: Don't clear spectatorsWantingToJoin here
       lobby.lastTimeBelowThreePlayers = null;
       lobby.turnEndsAt = null;
@@ -628,22 +651,39 @@ function startImpostorGuessTimer(lobby) {
 function cleanupLobby(lobby, lobbyId) {
   const now = Date.now();
   let hasChanges = false;
+  let restartStateChanged = false;
   
+  // Filter players and remove from restartReady if disconnected
   lobby.players = lobby.players.filter(p => {
     if (p.ws?.readyState === 1) return true;
     if (p.lastDisconnectTime && now - p.lastDisconnectTime > 60000) {
       console.log(`Removing disconnected player after 60s: ${p.name}`);
       hasChanges = true;
+      
+      // Remove from restartReady if present
+      const restartIndex = lobby.restartReady.indexOf(p.id);
+      if (restartIndex !== -1) {
+        lobby.restartReady.splice(restartIndex, 1);
+        restartStateChanged = true;
+      }
       return false;
     }
     return true;
   });
   
+  // Filter spectators and remove from spectatorsWantingToJoin if disconnected
   lobby.spectators = lobby.spectators.filter(s => {
     if (s.ws?.readyState === 1) return true;
     if (s.lastDisconnectTime && now - s.lastDisconnectTime > 60000) {
       console.log(`Removing disconnected spectator after 60s: ${s.name}`);
       hasChanges = true;
+      
+      // Remove from spectatorsWantingToJoin if present
+      const wantingIndex = lobby.spectatorsWantingToJoin.indexOf(s.id);
+      if (wantingIndex !== -1) {
+        lobby.spectatorsWantingToJoin.splice(wantingIndex, 1);
+        restartStateChanged = true;
+      }
       return false;
     }
     return true;
@@ -665,6 +705,11 @@ function cleanupLobby(lobby, lobbyId) {
   // Check game end conditions during cleanup (every 15 seconds)
   if (lobby.phase !== 'lobby' && lobby.phase !== 'results' && lobby.phase !== 'impostorGuess') {
     checkGameEndConditions(lobby, lobbyId);
+  }
+  
+  // If restart state changed, send updates
+  if (restartStateChanged) {
+    sendRestartUpdates(lobby);
   }
   
   if (hasChanges) {
@@ -964,6 +1009,11 @@ wss.on('connection', (ws, req) => {
             }
           }
           
+          // Send restart updates if restart was in progress
+          if (lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) {
+            sendRestartUpdates(lobby);
+          }
+          
           if (lobby.players.length === 0 && lobby.spectators.length === 0) {
             delete lobbies[lobbyId];
           } else {
@@ -1221,7 +1271,8 @@ wss.on('connection', (ws, req) => {
             winner
           });
           lobby.phase = 'results';
-          lobby.restartReady = [];
+          // FIX: Don't clear restartReady - let them persist
+          // lobby.restartReady = [];
           // FIX: Don't clear spectatorsWantingToJoin
           lobby.lastTimeBelowThreePlayers = null;
           lobby.turnEndsAt = null;
@@ -1266,7 +1317,8 @@ wss.on('connection', (ws, req) => {
         });
         
         lobby.phase = 'results';
-        lobby.restartReady = [];
+        // FIX: Don't clear restartReady
+        // lobby.restartReady = [];
         // FIX: Don't clear spectatorsWantingToJoin
         lobby.lastTimeBelowThreePlayers = null;
         lobby.turnEndsAt = null;
@@ -1281,10 +1333,12 @@ wss.on('connection', (ws, req) => {
         
         sendRestartUpdates(lobby);
         
+        // FIX: Only count connected players who have a role (were in the game)
         const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
         const playersInGame = connectedPlayers.filter(p => p.role);
         
-        if (playersInGame.length > 0 && lobby.restartReady.length === playersInGame.length) {
+        // FIX: Also check if we have enough players to restart (minimum 3)
+        if (playersInGame.length >= 3 && lobby.restartReady.length === playersInGame.length) {
           const spectatorsToJoin = lobby.spectators.filter(s => 
             s.ws?.readyState === 1 && s.wantsToJoinNextGame
           );
@@ -1538,6 +1592,9 @@ wss.on('connection', (ws, req) => {
         player.connectionId = connectionId;
         player.connectionEpoch = (player.connectionEpoch || 0) + 1;
         ws.connectionEpoch = player.connectionEpoch;
+        
+        // FIX: Restore wantsToJoinNextGame from server state
+        player.wantsToJoinNextGame = lobby.spectatorsWantingToJoin.includes(msg.playerId);
       } else {
         const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
         const baseName = msg.name || `Spectator-${Math.floor(Math.random() * 1000)}`;
@@ -1558,7 +1615,7 @@ wss.on('connection', (ws, req) => {
           isSpectator: true,
           connectionId,
           lastActionTime: Date.now(),
-          wantsToJoinNextGame: lobby.spectatorsWantingToJoin.includes(msg.playerId), // FIX: Set based on existing state
+          wantsToJoinNextGame: false,
           connectionEpoch: 1
         };
         ws.connectionEpoch = 1;
@@ -1676,6 +1733,7 @@ wss.on('connection', (ws, req) => {
 
   function sendRestartUpdates(lobby) {
     const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+    // FIX: Only count players who have a role (were in the game)
     const playersInGame = connectedPlayers.filter(p => p.role);
     
     lobby.players.forEach(p => {
