@@ -615,6 +615,7 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
   startTurnTimer(lobby);
 }
 
+// Update startImpostorGuessTimer function (around line 650)
 function startImpostorGuessTimer(lobby) {
   if (lobby.impostorGuessTimeout?.timer) {
     clearTimeout(lobby.impostorGuessTimeout.timer);
@@ -628,21 +629,46 @@ function startImpostorGuessTimer(lobby) {
       console.log(`Impostor guess timeout in lobby`);
       
       const impostors = lobby.players.filter(p => p.role === 'impostor');
-      if (impostors.length > 0) {
-        broadcast(lobby, {
-          type: 'gameEnd',
-          roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-          secretWord: lobby.word,
-          hint: lobby.hint,
-          winner: 'Civilians',
-          reason: 'impostorFailedToGuess'
-        });
+      const ejectedImpostors = impostors.filter(p => !p.ws?.readyState === 1 || p.vote);
+      
+      // Check if any guesses were made
+      let anyCorrect = false;
+      if (lobby.impostorGuesses) {
+        for (const guessData of Object.values(lobby.impostorGuesses)) {
+          if (guessData.guess === lobby.word.toLowerCase()) {
+            anyCorrect = true;
+            break;
+          }
+        }
       }
+      
+      let winner;
+      if (anyCorrect) {
+        winner = 'Impostors';
+      } else {
+        const remainingImpostors = impostors.filter(p => 
+          !ejectedImpostors.some(e => e.id === p.id)
+        );
+        winner = (lobby.twoImpostorsOption && remainingImpostors.length > 0) ? 'Draw' : 'Civilians';
+      }
+      
+      broadcast(lobby, {
+        type: 'gameEnd',
+        roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+        votes: Object.fromEntries(lobby.players.filter(p => p.vote).map(p => [p.name, p.vote])),
+        secretWord: lobby.word,
+        hint: lobby.hint,
+        winner,
+        reason: 'impostorGuessTimeout',
+        impostorGuesses: lobby.impostorGuesses || {},
+        twoImpostorsMode: lobby.twoImpostorsOption || false
+      });
       
       lobby.phase = 'results';
       lobby.lastTimeBelowThreePlayers = null;
       lobby.turnEndsAt = null;
       lobby.impostorGuessTimeout = null;
+      lobby.impostorGuesses = null;
       
       broadcastLobbyList();
     }, 30000)
