@@ -897,6 +897,15 @@ input:disabled {
   cursor: help;
 }
 
+/* NEW: Two impostors badge in lobby list */
+.two-impostors-badge {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 12px;
+  color: #9b59b6;
+  cursor: help;
+}
+
 /* Phase indicators in lobby list */
 .phase-indicator {
   font-size: 11px;
@@ -930,11 +939,11 @@ input:disabled {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  margin: 12px 0;
-  padding: 10px;
+  margin: 8px 0; /* Reduced margin to fit both toggles */
+  padding: 8px;
   background: rgba(13, 17, 28, 0.6);
   border-radius: 10px;
-  font-size: 14px;
+  font-size: 13px; /* Slightly smaller font */
   border: 1px solid rgba(106, 139, 255, 0.2);
 }
 
@@ -942,8 +951,8 @@ input:disabled {
 .switch {
   position: relative;
   display: inline-block;
-  width: 50px;
-  height: 24px;
+  width: 46px; /* Slightly smaller */
+  height: 22px; /* Slightly smaller */
 }
 
 .switch input {
@@ -961,14 +970,14 @@ input:disabled {
   bottom: 0;
   background-color: #2c3e50;
   transition: .4s;
-  border-radius: 24px;
+  border-radius: 22px;
 }
 
 .slider:before {
   position: absolute;
   content: "";
-  height: 16px;
-  width: 16px;
+  height: 14px; /* Smaller */
+  width: 14px; /* Smaller */
   left: 4px;
   bottom: 4px;
   background-color: white;
@@ -981,7 +990,7 @@ input:checked + .slider {
 }
 
 input:checked + .slider:before {
-  transform: translateX(26px);
+  transform: translateX(24px); /* Adjusted for smaller size */
 }
 
 input:disabled + .slider {
@@ -996,6 +1005,7 @@ input:disabled + .slider {
   color: #fff;
   cursor: pointer;
   font-weight: 500;
+  font-size: 13px; /* Smaller font */
 }
 
 .toggle-label.disabled {
@@ -1006,9 +1016,9 @@ input:disabled + .slider {
 .info-icon {
   cursor: pointer;
   color: #6a8bff;
-  font-size: 14px;
-  width: 16px;
-  height: 16px;
+  font-size: 12px; /* Smaller */
+  width: 14px; /* Smaller */
+  height: 14px; /* Smaller */
   display: inline-flex;
   align-items: center;
   justify-content: center;
