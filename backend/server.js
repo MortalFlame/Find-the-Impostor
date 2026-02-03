@@ -1360,52 +1360,72 @@ wss.on('connection', (ws, req) => {
             broadcastLobbyList();
           }
         }
-      }
-
       if (msg.type === 'impostorGuess') {
-        if (lobby.phase !== 'impostorGuess') return;
-        
-        const impostors = lobby.players.filter(p => p.role === 'impostor');
-        const ejectedImpostor = impostors.find(p => !p.ws?.readyState === 1 || p.vote);
-        
-        if (!ejectedImpostor || player.id !== ejectedImpostor.id) return;
-        
+    if (lobby.phase !== 'impostorGuess') return;
+    
+    // Track which impostors have guessed
+    if (!lobby.impostorGuesses) {
+        lobby.impostorGuesses = {};
+    }
+    
+    // Record this impostor's guess
+    lobby.impostorGuesses[player.id] = {
+        guess: String(msg.guess || '').trim().toLowerCase(),
+        name: player.name
+    };
+    
+    // Check if all ejected impostors have guessed
+    const impostors = lobby.players.filter(p => p.role === 'impostor');
+    const ejectedImpostors = impostors.filter(p => !p.ws?.readyState === 1 || p.vote);
+    const allGuessed = ejectedImpostors.length > 0 && 
+                      ejectedImpostors.every(impostor => lobby.impostorGuesses[impostor.id]);
+    
+    if (allGuessed || (lobby.impostorGuesses && Object.keys(lobby.impostorGuesses).length >= ejectedImpostors.length)) {
         if (lobby.impostorGuessTimeout?.timer) {
-          clearTimeout(lobby.impostorGuessTimeout.timer);
-          lobby.impostorGuessTimeout = null;
+            clearTimeout(lobby.impostorGuessTimeout.timer);
+            lobby.impostorGuessTimeout = null;
         }
         
-        const guess = String(msg.guess || '').trim().toLowerCase();
-        const correct = guess === lobby.word.toLowerCase();
+        // Calculate if any impostor guessed correctly
+        let anyCorrect = false;
+        for (const guessData of Object.values(lobby.impostorGuesses)) {
+            if (guessData.guess === lobby.word.toLowerCase()) {
+                anyCorrect = true;
+                break;
+            }
+        }
         
         let winner;
-        if (correct) {
-          winner = 'Impostors';
+        if (anyCorrect) {
+            winner = 'Impostors';
         } else {
-          const remainingImpostors = lobby.players.filter(p => 
-            p.role === 'impostor' && p.id !== ejectedImpostor.id
-          );
-          winner = remainingImpostors.length > 0 ? 'Draw' : 'Civilians';
+            // In two-impostor mode, if only one impostor was ejected and guessed wrong
+            // but the other impostor is still in the game, it's a draw
+            const remainingImpostors = impostors.filter(p => 
+                !ejectedImpostors.some(e => e.id === p.id)
+            );
+            winner = (lobby.twoImpostorsOption && remainingImpostors.length > 0) ? 'Draw' : 'Civilians';
         }
         
         broadcast(lobby, {
-          type: 'gameEnd',
-          roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-          votes: Object.fromEntries(lobby.players.filter(p => p.vote).map(p => [p.name, p.vote])),
-          secretWord: lobby.word,
-          hint: lobby.hint,
-          winner,
-          impostorGuess: guess,
-          impostorGuessCorrect: correct,
-          twoImpostorsMode: lobby.twoImpostorsOption || false
+            type: 'gameEnd',
+            roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+            votes: Object.fromEntries(lobby.players.filter(p => p.vote).map(p => [p.name, p.vote])),
+            secretWord: lobby.word,
+            hint: lobby.hint,
+            winner,
+            impostorGuesses: lobby.impostorGuesses,
+            twoImpostorsMode: lobby.twoImpostorsOption || false
         });
         
         lobby.phase = 'results';
         lobby.lastTimeBelowThreePlayers = null;
         lobby.turnEndsAt = null;
+        lobby.impostorGuesses = null;
         
         broadcastLobbyList();
-      }
+    }
+}
 
       if (msg.type === 'restart') {
         if (!isSpectator && player.role && !lobby.restartReady.includes(player.id)) {
