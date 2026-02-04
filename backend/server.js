@@ -1436,57 +1436,67 @@ wss.on('connection', (ws, req) => {
   });
 
   function handlePlayerJoin(ws, msg, targetLobbyId, connectionId) {
-    const lobby = lobbies[targetLobbyId];
-    lobbyId = targetLobbyId;
+  const lobby = lobbies[targetLobbyId];
+  lobbyId = targetLobbyId;
+  
+  let existingPlayer = lobby.players.find(p => p.id === msg.playerId);
+  if (existingPlayer) {
+    player = existingPlayer;
+    replaceSocket(player, ws);
+    player.lastDisconnectTime = null;
+    player.connectionId = connectionId;
+    player.reconnectionAttempts = (player.reconnectionAttempts || 0) + 1;
+    player.connectionEpoch = (player.connectionEpoch || 0) + 1;
+    ws.connectionEpoch = player.connectionEpoch;
     
-    let existingPlayer = lobby.players.find(p => p.id === msg.playerId);
-    if (existingPlayer) {
-      player = existingPlayer;
-      replaceSocket(player, ws);
-      player.lastDisconnectTime = null;
-      player.connectionId = connectionId;
-      player.reconnectionAttempts = (player.reconnectionAttempts || 0) + 1;
-      player.connectionEpoch = (player.connectionEpoch || 0) + 1;
-      ws.connectionEpoch = player.connectionEpoch;
-    } else {
-      // Check if name is already taken in this lobby
-      const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
-      // SANITIZE: Remove HTML tags and limit length
-      let uniqueName = String(msg.name)
-        .replace(/[<>]/g, '') // Remove < and >
-        .substring(0, 20)     // Limit to 20 characters
-        .trim();
-      
-      // If name is taken, make it unique
-      if (isNameTakenInLobby(lobby, uniqueName)) {
-        uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
-        console.log(`Name "${msg.name}" was taken in lobby ${targetLobbyId}, changed to "${uniqueName}"`);
-      }
-      
-      player = { 
-        id: msg.playerId, 
-        name: uniqueName, 
-        ws, 
-        connectionId,
-        lastActionTime: Date.now(),
-        reconnectionAttempts: 0,
-        connectionEpoch: 1
-      };
-      ws.connectionEpoch = 1;
-      lobby.players.push(player);
-      
-      if (!lobby.owner) {
-        lobby.owner = msg.playerId;
-      }
-      
-      // FIX #3: Set the host name correctly
-      if (lobby.owner === msg.playerId && !lobby.hostName) {
-        lobby.hostName = uniqueName;
-      }
+    // IMPORTANT: Reset the disconnect time to allow them to continue playing
+    player.lastDisconnectTime = null;
+    
+    // If game is in progress and player was marked as disconnected,
+    // they should resume as a player, not spectator
+    if (lobby.phase !== 'lobby' && lobby.phase !== 'results') {
+      console.log(`Player ${player.name} reconnected to active game in lobby ${targetLobbyId}, phase: ${lobby.phase}`);
     }
+  } else {
+    // Check if name is already taken in this lobby
+    const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
+    // SANITIZE: Remove HTML tags and limit length
+    let uniqueName = String(msg.name)
+      .replace(/[<>]/g, '') // Remove < and >
+      .substring(0, 20)     // Limit to 20 characters
+      .trim();
+    
+    // If name is taken, make it unique
+    if (isNameTakenInLobby(lobby, uniqueName)) {
+      uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
+      console.log(`Name "${msg.name}" was taken in lobby ${targetLobbyId}, changed to "${uniqueName}"`);
+    }
+    
+    player = { 
+      id: msg.playerId, 
+      name: uniqueName, 
+      ws, 
+      connectionId,
+      lastActionTime: Date.now(),
+      reconnectionAttempts: 0,
+      connectionEpoch: 1,
+      lastDisconnectTime: null // Initialize as null
+    };
+    ws.connectionEpoch = 1;
+    lobby.players.push(player);
+    
+    if (!lobby.owner) {
+      lobby.owner = msg.playerId;
+    }
+    
+    // FIX #3: Set the host name correctly
+    if (lobby.owner === msg.playerId && !lobby.hostName) {
+      lobby.hostName = uniqueName;
+    }
+  }
 
-    // FIX #4: Mark client as in a lobby
-    ws.inLobby = true;
+  // FIX #4: Mark client as in a lobby
+  ws.inLobby = true;
 
     if (lobby.phase === 'results') {
       setTimeout(() => {
