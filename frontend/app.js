@@ -121,6 +121,45 @@ function safeError(...args) {
   }
 }
 
+// Immediate reconnection function for page visibility changes
+function forceImmediateReconnect() {
+  safeLog('Forcing immediate reconnect...');
+  
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+  
+  if (ws) {
+    try {
+      ws.onopen = null;
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.close();
+    } catch (err) {
+      // Ignore
+    }
+    ws = null;
+  }
+  
+  // Reset reconnection delay for immediate attempt
+  reconnectDelay = 0;
+  connectionAttempts = 0;
+  
+  // Reconnect based on current state
+  if (isSpectator && currentLobbyId) {
+    joinAsSpectator();
+  } else if (currentLobbyId) {
+    joinAsPlayer(true);
+  }
+}
+
 function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
@@ -477,24 +516,29 @@ document.addEventListener('visibilitychange', () => {
     impostorGuessTimer = null;
   }
   
-  safeLog('Page visible - checking connection');
+  // IMPROVED: More aggressive reconnection when page becomes visible
   if (!document.hidden) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      safeLog('Page visible but no active WebSocket, forcing reconnect');
-      updateConnectionStatus('connecting', 'Page resumed, reconnecting...');
+    safeLog('Page became visible - checking connection status');
+    
+    // If we're in a game and not connected, reconnect immediately
+    if (currentLobbyId && (!ws || ws.readyState !== WebSocket.OPEN)) {
+      safeLog('In game but not connected - forcing immediate reconnect');
+      updateConnectionStatus('connecting', 'Reconnecting after page visibility...');
       
+      // Use a very short delay for visibility changes
       setTimeout(() => {
-        forceReconnect();
-      }, 500);
-    } else {
+        forceImmediateReconnect();
+      }, 100); // Only 100ms delay for visibility changes
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
+      // Already connected, just send a ping to verify
       lastPingTime = Date.now();
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
       } catch (err) {
-        safeLog('Failed to send ping after visibility change, reconnecting');
+        safeLog('Failed to send ping after visibility change, will reconnect');
         setTimeout(() => {
-          forceReconnect();
-        }, 500);
+          forceImmediateReconnect();
+        }, 100);
       }
     }
   }
@@ -1889,17 +1933,18 @@ window.addEventListener('pageshow', (e) => {
   if (e.persisted) {
     safeLog('Page restored from bfcache, forcing reconnect');
     setTimeout(() => {
-      forceReconnect();
+      forceImmediateReconnect();
     }, 100);
   }
 });
 
 window.addEventListener('online', () => {
   safeLog('Network came online, checking connection');
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (currentLobbyId && (!ws || ws.readyState !== WebSocket.OPEN)) {
+    safeLog('Network restored while in game - reconnecting immediately');
     setTimeout(() => {
-      forceReconnect();
-    }, 500);
+      forceImmediateReconnect();
+    }, 100);
   }
 });
 
