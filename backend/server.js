@@ -411,7 +411,12 @@ function startGame(lobby) {
   lobby.ejectedPlayers = null;
   lobby.impostorGuesses = null;
 
-  lobby.spectators.forEach(s => s.vote = '');
+  lobby.spectators.forEach(s => {
+    s.vote = '';
+    // Reset wantsToJoinNextGame for all spectators when a new game starts
+    s.wantsToJoinNextGame = false;
+  });
+  lobby.spectatorsWantingToJoin = [];
 
   const { word, hint } = getRandomWord(lobby);
   lobby.word = word;
@@ -1468,7 +1473,13 @@ wss.on('connection', (ws, req) => {
           connectedPlayers.some(p => p.id === id)
         );
         
+        console.log(`Restart condition check: ${readyConnectedPlayers.length}/${playersInGame.length} players ready, ${connectedPlayers.length} connected players total`);
+        
+        // FIX: Game should only restart when ALL players from the previous round press restart
+        // Not when at least 3 players are ready
         if (playersInGame.length >= 3 && readyConnectedPlayers.length === playersInGame.length) {
+          console.log(`Restart condition met for lobby ${lobbyId}: All ${playersInGame.length} players ready`);
+          
           const spectatorsToJoin = lobby.spectators.filter(s => 
             s.ws?.readyState === 1 && s.wantsToJoinNextGame
           );
@@ -1496,6 +1507,8 @@ wss.on('connection', (ws, req) => {
           
           lobby.spectatorsWantingToJoin = [];
           startGame(lobby);
+        } else {
+          console.log(`Restart condition NOT met: ${readyConnectedPlayers.length}/${playersInGame.length} players ready (need all ${playersInGame.length})`);
         }
       }
 
@@ -1720,7 +1733,14 @@ wss.on('connection', (ws, req) => {
         player.connectionEpoch = (player.connectionEpoch || 0) + 1;
         ws.connectionEpoch = player.connectionEpoch;
         
-        player.wantsToJoinNextGame = lobby.spectatorsWantingToJoin.includes(msg.playerId);
+        // FIX: Restore wantsToJoinNextGame state from spectator object
+        // This ensures the state persists across reconnections
+        player.wantsToJoinNextGame = player.wantsToJoinNextGame || false;
+        
+        // Also ensure they're in spectatorsWantingToJoin if they want to join
+        if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
+          lobby.spectatorsWantingToJoin.push(player.id);
+        }
       } else {
         const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
         const baseName = msg.name || `Spectator-${Math.floor(Math.random() * 1000)}`;
