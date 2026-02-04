@@ -605,8 +605,24 @@ function exitLobby() {
       // Ignore close errors
     }
   }
-  updateJoinButtonText();
   
+  // FIX: Reset all state variables
+  isSpectator = false;
+  currentLobbyId = null;
+  connectionAttempts = 0;
+  spectatorWantsToJoin = false;
+  spectatorHasClickedRestart = false;
+  hasClickedRestart = false;
+  myPlayerName = '';
+  joinType = 'browseLobbies';
+  isOwner = false;
+  impostorGuessOption = false;
+  twoImpostorsOption = false;
+  twoImpostorsMode = false;
+  isEjectedImpostor = false;
+  isImpostor = false;
+  
+  // Reset UI
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
   gameHeader.classList.add('hidden');
@@ -616,18 +632,6 @@ function exitLobby() {
   lobbyId.value = '';
   players.innerHTML = '';
   
-  isSpectator = false;
-  currentLobbyId = null;
-  connectionAttempts = 0;
-  spectatorWantsToJoin = false;
-  spectatorHasClickedRestart = false;
-  myPlayerName = '';
-  joinType = 'browseLobbies';
-  isOwner = false;
-  impostorGuessOption = false;
-  twoImpostorsOption = false;
-  twoImpostorsMode = false;
-  isEjectedImpostor = false; // Reset ejected impostor state
   updateConnectionStatus('disconnected');
   
   stopTurnTimerAnimation();
@@ -657,6 +661,8 @@ function exitLobby() {
       connect();
     }
   }, 300);
+  
+  updateJoinButtonText();
 }
 
 function resetToLobbyScreen() {
@@ -841,59 +847,69 @@ function connect() {
       }
     }, 5000);
     
-  ws.onopen = () => {
-  safeLog('Game connection established');
-  if (connectTimeout) {
-    clearTimeout(connectTimeout);
-    connectTimeout = null;
-  }
-  
-  connectionAttempts = 0;
-  reconnectDelay = 2000;
-  hasShownConnectionWarning = false;
-  updateConnectionStatus('connected');
-  
-  if (joinType !== 'browseLobbies') {
-    gameHeader.classList.remove('hidden');
-  }
-  
-  if (window.pingInterval) clearInterval(window.pingInterval);
-  window.pingInterval = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      lastPingTime = Date.now();
-      try {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      } catch (err) {
-        safeError('Failed to send ping');
+    ws.onopen = () => {
+      safeLog('Game connection established');
+      if (connectTimeout) {
+        clearTimeout(connectTimeout);
+        connectTimeout = null;
       }
-    }
-  }, 25000);
-  
-  setTimeout(() => {
-    if (joinType === 'browseLobbies') {
-      try {
-        ws.send(JSON.stringify({ type: 'getLobbyList' }));
-      } catch (err) {
-        safeError('Failed to send getLobbyList');
+      
+      connectionAttempts = 0;
+      reconnectDelay = 2000;
+      hasShownConnectionWarning = false;
+      updateConnectionStatus('connected');
+      
+      if (joinType !== 'browseLobbies') {
+        gameHeader.classList.remove('hidden');
       }
-    } else if (joinType === 'joinSpectator') {
-      ws.send(JSON.stringify({
-        type: 'joinSpectator',
-        name: nickname.value.trim(),
-        lobbyId: lobbyId.value.trim(),
-        playerId
-      }));
-    } else {
-      ws.send(JSON.stringify({
-        type: 'joinLobby',
-        name: nickname.value.trim(),
-        lobbyId: lobbyId.value || undefined,
-        playerId
-      }));
-    }
-  }, 200);
-};
-  
+      
+      if (window.pingInterval) clearInterval(window.pingInterval);
+      window.pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          lastPingTime = Date.now();
+          try {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          } catch (err) {
+            safeError('Failed to send ping');
+          }
+        }
+      }, 25000);
+      
+      setTimeout(() => {
+        if (joinType === 'browseLobbies') {
+          try {
+            ws.send(JSON.stringify({ type: 'getLobbyList' }));
+          } catch (err) {
+            safeError('Failed to send getLobbyList');
+          }
+        } else if (joinType === 'joinSpectator') {
+          ws.send(JSON.stringify({
+            type: 'joinSpectator',
+            name: nickname.value.trim(),
+            lobbyId: lobbyId.value.trim(),
+            playerId
+          }));
+        } else {
+          ws.send(JSON.stringify({
+            type: 'joinLobby',
+            name: nickname.value.trim(),
+            lobbyId: lobbyId.value || undefined,
+            playerId
+          }));
+        }
+        
+        // FIX: After joining, request current restart state if we're in a game
+        setTimeout(() => {
+          if (currentLobbyId && ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({ type: 'restart' }));
+            } catch (err) {
+              safeError('Failed to request restart state on reconnect');
+            }
+          }
+        }, 500);
+      }, 200);
+    };
 
     ws.onmessage = (e) => {
       try {
@@ -973,6 +989,17 @@ function connect() {
           if (isSpectator) {
             nickname.value = nickname.value.startsWith('👁️ ') ? nickname.value : `👁️ ${nickname.value.trim()}`;
             nickname.disabled = true;
+            
+            // FIX: Request restart state from server on reconnection
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              setTimeout(() => {
+                try {
+                  ws.send(JSON.stringify({ type: 'restart' }));
+                } catch (err) {
+                  safeError('Failed to request restart state');
+                }
+              }, 300);
+            }
           }
           
           exitLobbyBtn.style.display = 'block';
@@ -1038,6 +1065,12 @@ function connect() {
             if (document.getElementById('playerNameDisplay')) {
               document.getElementById('playerNameDisplay').textContent = myPlayerName;
             }
+          }
+          
+          // FIX: If we're no longer a spectator, remove the eye icon
+          if (!isSpectator && d.role !== 'spectator') {
+            nickname.value = nickname.value.replace('👁️ ', '');
+            nickname.disabled = false;
           }
           
           results.innerHTML = ''; 
@@ -1520,30 +1553,26 @@ function connect() {
 
         if (d.type === 'restartUpdate') {
           if (d.isSpectator) {
-            if (spectatorHasClickedRestart) {
+            // FIX: Update spectator state based on server response
+            spectatorWantsToJoin = d.wantsToJoin || false;
+            
+            if (spectatorHasClickedRestart && spectatorWantsToJoin) {
               restart.innerText = `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
               restart.disabled = true;
               restart.style.opacity = '0.7';
-              spectatorWantsToJoin = true;
-            } else if (d.wantsToJoin || d.status === 'joining') {
-              spectatorWantsToJoin = true;
-              if (spectatorHasClickedRestart) {
-                restart.innerText = `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
-                restart.disabled = true;
-                restart.style.opacity = '0.7';
-              } else {
-                restart.innerText = 'Join Next Game';
-                restart.disabled = false;
-                restart.style.opacity = '1';
-              }
+            } else if (spectatorWantsToJoin) {
+              restart.innerText = 'Joining next game...';
+              restart.disabled = false;
+              restart.style.opacity = '1';
             } else {
-              spectatorWantsToJoin = false;
               restart.innerText = 'Join Next Game';
               restart.disabled = false;
               restart.style.opacity = '1';
+              spectatorHasClickedRestart = false;
             }
           } else {
             if (d.playerRole) {
+              // Player with a role (from previous game)
               if (hasClickedRestart) {
                 restart.innerText = `Waiting for others... (${d.readyCount}/${d.totalPlayers})`;
                 restart.disabled = true;
@@ -1554,6 +1583,7 @@ function connect() {
                 restart.style.opacity = '1';
               }
             } else {
+              // Player without a role (new player waiting to join)
               if (hasClickedRestart) {
                 restart.innerText = `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
                 restart.disabled = true;
@@ -1571,6 +1601,9 @@ function connect() {
           isSpectator = false;
           spectatorWantsToJoin = false;
           spectatorHasClickedRestart = false;
+          hasClickedRestart = false; // Also reset player restart state
+          
+          // FIX: Remove eye icon and enable nickname field
           nickname.value = nickname.value.replace('👁️ ', '');
           nickname.disabled = false;
           
@@ -1578,9 +1611,15 @@ function connect() {
             document.getElementById('playerNameDisplay').textContent = myPlayerName;
           }
           
+          // FIX: Update restart button for player
           restart.innerText = 'Restart Game';
           restart.disabled = false;
           restart.style.opacity = '1';
+          
+          // Also update the restart button in the game if we're in results phase
+          if (gameCard && !gameCard.classList.contains('hidden')) {
+            restart.classList.remove('hidden');
+          }
         }
 
       } catch (error) {
@@ -1886,22 +1925,18 @@ restart.onclick = () => {
   }
   
   if (isSpectator) {
-    if (restart.innerText === 'Join Next Game') {
-      spectatorWantsToJoin = true;
+    // FIX: Only send restart if we haven't already clicked it
+    if (!spectatorHasClickedRestart) {
       spectatorHasClickedRestart = true;
+      spectatorWantsToJoin = true;
       ws.send(JSON.stringify({ type: 'restart' }));
       restart.innerText = 'Joining next game...';
       restart.disabled = true;
       restart.style.opacity = '0.7';
     }
   } else {
-    if (restart.innerText === 'Join Next Game') {
-      hasClickedRestart = true;
-      ws.send(JSON.stringify({ type: 'restart' }));
-      restart.innerText = 'Joining next game...';
-      restart.disabled = true;
-      restart.style.opacity = '0.7';
-    } else if (restart.innerText === 'Restart Game') {
+    // FIX: Only send restart if we haven't already clicked it
+    if (!hasClickedRestart) {
       hasClickedRestart = true;
       ws.send(JSON.stringify({ type: 'restart' }));
       restart.innerText = 'Waiting for others...';
