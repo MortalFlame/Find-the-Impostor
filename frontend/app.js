@@ -185,45 +185,6 @@ function showConnectionWarning(message) {
   }, 5000);
 }
 
-// Immediate reconnection function for page visibility changes
-function forceImmediateReconnect() {
-  safeLog('Forcing immediate reconnect...');
-  
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-  
-  if (connectTimeout) {
-    clearTimeout(connectTimeout);
-    connectTimeout = null;
-  }
-  
-  if (ws) {
-    try {
-      ws.onopen = null;
-      ws.onclose = null;
-      ws.onerror = null;
-      ws.onmessage = null;
-      ws.close();
-    } catch (err) {
-      // Ignore
-    }
-    ws = null;
-  }
-  
-  // Reset reconnection delay for immediate attempt
-  reconnectDelay = 0;
-  connectionAttempts = 0;
-  
-  // Reconnect based on current state
-  if (isSpectator && currentLobbyId) {
-    joinAsSpectator();
-  } else if (currentLobbyId) {
-    joinAsPlayer(true);
-  }
-}
-
 // Absolute-time timer functions
 function getRemainingTimeMs() {
   if (!currentTurnEndsAt) return 0;
@@ -554,29 +515,25 @@ document.addEventListener('visibilitychange', () => {
     impostorGuessTimer = null;
   }
   
-  // IMPROVED: More aggressive reconnection when page becomes visible
+  // Reconnection logic for visibility changes
+  safeLog('Page visible - checking connection');
   if (!document.hidden) {
-    safeLog('Page became visible - checking connection status');
-    
-    // If we're in a game and not connected, reconnect immediately
-    if (currentLobbyId && (!ws || ws.readyState !== WebSocket.OPEN)) {
-      safeLog('In game but not connected - forcing immediate reconnect');
-      updateConnectionStatus('connecting', 'Reconnecting after page visibility...');
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      safeLog('Page visible but no active WebSocket, forcing reconnect');
+      updateConnectionStatus('connecting', 'Page resumed, reconnecting...');
       
-      // Use a very short delay for visibility changes
       setTimeout(() => {
-        forceImmediateReconnect();
-      }, 100); // Only 100ms delay for visibility changes
-    } else if (ws && ws.readyState === WebSocket.OPEN) {
-      // Already connected, just send a ping to verify
+        forceReconnect();
+      }, 500);
+    } else {
       lastPingTime = Date.now();
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
       } catch (err) {
-        safeLog('Failed to send ping after visibility change, will reconnect');
+        safeLog('Failed to send ping after visibility change, reconnecting');
         setTimeout(() => {
-          forceImmediateReconnect();
-        }, 100);
+          forceReconnect();
+        }, 500);
       }
     }
   }
@@ -750,23 +707,22 @@ function resetToLobbyScreen() {
     lobbyListContainer.style.display = 'block';
   }
   
-  // Refresh lobby list when returning to lobby screen
-  setTimeout(() => {
-    refreshLobbyList();
-  }, 500);
-  
-  // Start auto-refresh of lobby list
-  startLobbyListAutoRefresh();
-  
-  // FIX #3: Reconnect for lobby browsing if not already connected
-  setTimeout(() => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      joinType = 'browseLobbies';
-      connect();
-    }
-  }, 100);
-  
-  // Update join button text
+  // // Refresh lobby list when returning to lobby screen
+setTimeout(() => {
+  refreshLobbyList();
+}, 500);
+
+// Start auto-refresh of lobby list
+startLobbyListAutoRefresh();
+
+// FIX #3: Reconnect for lobby browsing if not already connected
+setTimeout(() => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    joinType = 'browseLobbies';
+    connect();
+  }
+}, 100);
+// Update join button text
   updateJoinButtonText();
 }
 
@@ -889,65 +845,65 @@ function connect() {
       }
     }, 5000);
     
-    ws.onopen = () => {
-      safeLog('Game connection established');
-      if (connectTimeout) {
-        clearTimeout(connectTimeout);
-        connectTimeout = null;
+  ws.onopen = () => {
+  safeLog('Game connection established');
+  if (connectTimeout) {
+    clearTimeout(connectTimeout);
+    connectTimeout = null;
+  }
+  
+  connectionAttempts = 0;
+  reconnectDelay = 2000;
+  hasShownConnectionWarning = false;
+  updateConnectionStatus('connected');
+  
+  // Don't show game header for lobby browsing
+  if (joinType !== 'browseLobbies') {
+    gameHeader.classList.remove('hidden');
+  }
+  
+  if (window.pingInterval) clearInterval(window.pingInterval);
+  window.pingInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      lastPingTime = Date.now();
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (err) {
+        safeError('Failed to send ping');
       }
-      
-      connectionAttempts = 0;
-      reconnectDelay = 2000;
-      hasShownConnectionWarning = false;
-      updateConnectionStatus('connected');
-      
-      // Don't show game header for lobby browsing
-      if (joinType !== 'browseLobbies') {
-        gameHeader.classList.remove('hidden');
+    }
+  }, 25000);
+  
+  // FIX #2: Handle different connection types correctly
+  setTimeout(() => {
+    if (joinType === 'browseLobbies') {
+      // For browsing lobbies, just send a getLobbyList request
+      // Wait a bit to ensure connection is fully established
+      try {
+        ws.send(JSON.stringify({ type: 'getLobbyList' }));
+      } catch (err) {
+        safeError('Failed to send getLobbyList');
       }
-      
-      if (window.pingInterval) clearInterval(window.pingInterval);
-      window.pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          lastPingTime = Date.now();
-          try {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          } catch (err) {
-            safeError('Failed to send ping');
-          }
-        }
-      }, 25000);
-      
-      // FIX #2: Handle different connection types correctly
-      setTimeout(() => {
-        if (joinType === 'browseLobbies') {
-          // For browsing lobbies, just send a getLobbyList request
-          // Wait a bit to ensure connection is fully established
-          try {
-            ws.send(JSON.stringify({ type: 'getLobbyList' }));
-          } catch (err) {
-            safeError('Failed to send getLobbyList');
-          }
-        } else if (joinType === 'joinSpectator') {
-          // Joining as spectator
-          ws.send(JSON.stringify({
-            type: 'joinSpectator',
-            name: nickname.value.trim(),
-            lobbyId: lobbyId.value.trim(),
-            playerId
-          }));
-        } else {
-          // Default: joining as player (host or regular player)
-          ws.send(JSON.stringify({
-            type: 'joinLobby',
-            name: nickname.value.trim(),
-            lobbyId: lobbyId.value || undefined,
-            playerId
-          }));
-        }
-      }, 200);
-    };
-    
+    } else if (joinType === 'joinSpectator') {
+      // Joining as spectator
+      ws.send(JSON.stringify({
+        type: 'joinSpectator',
+        name: nickname.value.trim(),
+        lobbyId: lobbyId.value.trim(),
+        playerId
+      }));
+    } else {
+      // Default: joining as player (host or regular player)
+      ws.send(JSON.stringify({
+        type: 'joinLobby',
+        name: nickname.value.trim(),
+        lobbyId: lobbyId.value || undefined,
+        playerId
+      }));
+    }
+  }, 200);
+};
+  
 
     ws.onmessage = (e) => {
       try {
@@ -1719,7 +1675,7 @@ window.addEventListener('pageshow', (e) => {
   if (e.persisted) {
     safeLog('Page restored from bfcache, forcing reconnect');
     setTimeout(() => {
-      forceImmediateReconnect();
+      forceReconnect();
     }, 100);
   }
 });
@@ -1727,11 +1683,10 @@ window.addEventListener('pageshow', (e) => {
 // Network online event for Android network switches
 window.addEventListener('online', () => {
   safeLog('Network came online, checking connection');
-  if (currentLobbyId && (!ws || ws.readyState !== WebSocket.OPEN)) {
-    safeLog('Network restored while in game - reconnecting immediately');
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
     setTimeout(() => {
-      forceImmediateReconnect();
-    }, 100);
+      forceReconnect();
+    }, 500);
   }
 });
 
