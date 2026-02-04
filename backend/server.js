@@ -402,20 +402,27 @@ function startGame(lobby) {
   lobby.turn = 0;
   lobby.round1 = [];
   lobby.round2 = [];
-  lobby.restartReady = lobby.restartReady.filter(id => 
-    lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
-  );
+  
+  // FIX: Clear restartReady completely when starting a new game
+  lobby.restartReady = [];
+  
   lobby.turnTimeout = null;
   lobby.impostorGuessTimeout = null;
   lobby.lastTimeBelowThreePlayers = null;
   lobby.ejectedPlayers = null;
   lobby.impostorGuesses = null;
 
+  // FIX: Reset wantsToJoinNextGame for all spectators when a new game starts
+  // But only for spectators who aren't already players
   lobby.spectators.forEach(s => {
     s.vote = '';
-    // Reset wantsToJoinNextGame for all spectators when a new game starts
-    s.wantsToJoinNextGame = false;
+    // Only reset if they're still a spectator (not converted to player)
+    if (lobby.spectators.includes(s)) {
+      s.wantsToJoinNextGame = false;
+    }
   });
+  
+  // FIX: Clear spectatorsWantingToJoin after processing
   lobby.spectatorsWantingToJoin = [];
 
   const { word, hint } = getRandomWord(lobby);
@@ -1466,6 +1473,8 @@ wss.on('connection', (ws, req) => {
         sendRestartUpdates(lobby);
         
         const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+        
+        // FIX: Only count players who were in the previous game AND are still connected
         const playersInGame = connectedPlayers.filter(p => p.role);
         
         // Don't wait for disconnected players - only count connected players
@@ -1473,16 +1482,18 @@ wss.on('connection', (ws, req) => {
           connectedPlayers.some(p => p.id === id)
         );
         
-        console.log(`Restart condition check: ${readyConnectedPlayers.length}/${playersInGame.length} players ready, ${connectedPlayers.length} connected players total`);
+        console.log(`Restart check for lobby ${lobbyId}: ${playersInGame.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players`);
         
         // FIX: Game should only restart when ALL players from the previous round press restart
-        // Not when at least 3 players are ready
+        // AND there are at least 3 players with roles (from previous game)
         if (playersInGame.length >= 3 && readyConnectedPlayers.length === playersInGame.length) {
-          console.log(`Restart condition met for lobby ${lobbyId}: All ${playersInGame.length} players ready`);
+          console.log(`Restart condition met for lobby ${lobbyId}: All ${playersInGame.length} players from previous game are ready`);
           
           const spectatorsToJoin = lobby.spectators.filter(s => 
             s.ws?.readyState === 1 && s.wantsToJoinNextGame
           );
+          
+          console.log(`Spectators wanting to join: ${spectatorsToJoin.length}`);
           
           spectatorsToJoin.forEach(spectator => {
             const spectatorIndex = lobby.spectators.findIndex(s => s.id === spectator.id);
@@ -1733,13 +1744,15 @@ wss.on('connection', (ws, req) => {
         player.connectionEpoch = (player.connectionEpoch || 0) + 1;
         ws.connectionEpoch = player.connectionEpoch;
         
-        // FIX: Restore wantsToJoinNextGame state from spectator object
-        // This ensures the state persists across reconnections
-        player.wantsToJoinNextGame = player.wantsToJoinNextGame || false;
-        
-        // Also ensure they're in spectatorsWantingToJoin if they want to join
+        // FIX: Always restore wantsToJoinNextGame from the spectator object
+        // The spectator object should have the correct state stored
         if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
           lobby.spectatorsWantingToJoin.push(player.id);
+        }
+        
+        // Also update from the lobby's spectatorsWantingToJoin list as backup
+        if (lobby.spectatorsWantingToJoin.includes(player.id) && !player.wantsToJoinNextGame) {
+          player.wantsToJoinNextGame = true;
         }
       } else {
         const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
@@ -1769,6 +1782,33 @@ wss.on('connection', (ws, req) => {
     }
 
     ws.inLobby = true;
+
+    // FIX: Send restart state update to the reconnected spectator
+    if (player.wantsToJoinNextGame) {
+      setTimeout(() => {
+        if (player.ws?.readyState === 1) {
+          try {
+            const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+            const playersInGame = connectedPlayers.filter(p => p.role);
+            const readyConnectedPlayers = lobby.restartReady.filter(id => 
+              connectedPlayers.some(p => p.id === id)
+            );
+            
+            player.ws.send(JSON.stringify({
+              type: 'restartUpdate',
+              readyCount: readyConnectedPlayers.length,
+              totalPlayers: playersInGame.length,
+              spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
+              isSpectator: true,
+              wantsToJoin: player.wantsToJoinNextGame,
+              status: player.wantsToJoinNextGame ? 'joining' : 'waiting'
+            }));
+          } catch (err) {
+            console.log(`Failed to send restart update to reconnected spectator ${player.name}`);
+          }
+        }
+      }, 500);
+    }
 
     if (lobby.phase === 'results') {
       setTimeout(() => {
@@ -1882,7 +1922,7 @@ wss.on('connection', (ws, req) => {
     const playersInGame = connectedPlayers.filter(p => p.role);
     
     // Filter restartReady to only include connected players
-    const connectedRestartReady = lobby.restartReady.filter(id => 
+    const readyConnectedPlayers = lobby.restartReady.filter(id => 
       connectedPlayers.some(p => p.id === id)
     );
     
@@ -1891,7 +1931,7 @@ wss.on('connection', (ws, req) => {
         try {
           p.ws.send(JSON.stringify({
             type: 'restartUpdate',
-            readyCount: connectedRestartReady.length,
+            readyCount: readyConnectedPlayers.length,
             totalPlayers: playersInGame.length,
             spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
             isSpectator: false,
@@ -1908,7 +1948,7 @@ wss.on('connection', (ws, req) => {
         try {
           s.ws.send(JSON.stringify({
             type: 'restartUpdate',
-            readyCount: connectedRestartReady.length,
+            readyCount: readyConnectedPlayers.length,
             totalPlayers: playersInGame.length,
             spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
             isSpectator: true,
