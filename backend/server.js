@@ -539,7 +539,7 @@ function startGame(lobby) {
           word: word,
           hint: hint,
           isSpectator: true,
-          playerName: s.name
+          playerName: s.name,
           wantsToJoinNextGame: s.wantsToJoinNextGame || false
         }));
         
