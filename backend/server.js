@@ -684,7 +684,7 @@ function startImpostorGuessTimer(lobby) {
       });
       
       lobby.phase = 'results';
-      lobby.lastTimeBelowThreePlayers = null;
+  lobby.lastTimeBelowThreePlayers = null;
       lobby.turnEndsAt = null;
       lobby.impostorGuessTimeout = null;
       lobby.impostorGuesses = null;
@@ -1681,6 +1681,7 @@ wss.on('connection', (ws, req) => {
     
     let existingPlayer = lobby.players.find(p => p.id === msg.playerId);
     if (existingPlayer) {
+      // FIX: Player is reconnecting - keep their existing game state
       player = existingPlayer;
       replaceSocket(player, ws);
       player.lastDisconnectTime = null;
@@ -1689,11 +1690,16 @@ wss.on('connection', (ws, req) => {
       player.connectionEpoch = (player.connectionEpoch || 0) + 1;
       ws.connectionEpoch = player.connectionEpoch;
       
-      // If game is in progress, they should resume as a player
-      if (lobby.phase !== 'lobby' && lobby.phase !== 'results') {
-        console.log(`Player ${player.name} reconnected to active game in lobby ${targetLobbyId}, phase: ${lobby.phase}`);
+      console.log(`Player ${player.name} reconnected to lobby ${targetLobbyId}, phase: ${lobby.phase}, role: ${player.role || 'none'}`);
+      
+      // Send the current game state to the reconnecting player
+      if (lobby.phase !== 'lobby') {
+        setTimeout(() => {
+          sendCurrentGameStateToPlayer(lobby, player);
+        }, 100);
       }
     } else {
+      // New player joining
       const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
       let uniqueName = String(msg.name)
         .replace(/[<>]/g, '')
@@ -1712,7 +1718,9 @@ wss.on('connection', (ws, req) => {
         connectionId,
         lastActionTime: Date.now(),
         reconnectionAttempts: 0,
-        connectionEpoch: 1
+        connectionEpoch: 1,
+        role: null,
+        vote: []
       };
       ws.connectionEpoch = 1;
       lobby.players.push(player);
@@ -1728,46 +1736,7 @@ wss.on('connection', (ws, req) => {
 
     ws.inLobby = true;
 
-    if (lobby.phase === 'results') {
-      setTimeout(() => {
-        try {
-          const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-          const winner = connectedPlayers.length >= 3 ? 'Game Ended' : 'Game Ended Early';
-          
-          ws.send(JSON.stringify({
-            type: 'gameEnd',
-            roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-            secretWord: lobby.word,
-            hint: lobby.hint,
-            winner
-          }));
-        } catch (err) {
-          console.log(`Error sending game state to new player ${player.name}`);
-        }
-      }, 100);
-    } else if (lobby.phase === 'impostorGuess') {
-      setTimeout(() => {
-        try {
-          const impostors = lobby.players.filter(p => p.role === 'impostor');
-          if (player.role === 'impostor') {
-            ws.send(JSON.stringify({
-              type: 'impostorGuessPhase',
-              isImpostor: true,
-              guessEndsAt: lobby.impostorGuessEndsAt
-            }));
-          } else {
-            ws.send(JSON.stringify({
-              type: 'impostorGuessPhase',
-              isImpostor: false,
-              guessEndsAt: lobby.impostorGuessEndsAt
-            }));
-          }
-        } catch (err) {
-          console.log(`Error sending impostor guess phase to ${player.name}`);
-        }
-      }, 100);
-    }
-
+    // Send lobby assignment
     ws.send(JSON.stringify({ 
       type: 'lobbyAssigned', 
       lobbyId,
@@ -1816,63 +1785,111 @@ wss.on('connection', (ws, req) => {
     const lobby = lobbies[targetLobbyId];
     lobbyId = targetLobbyId;
     
+    // Check if this is a reconnection of an existing player
     const existingPlayer = lobby.players.find(p => p.id === msg.playerId);
     if (existingPlayer) {
+      // FIX: Player exists - reconnect them as player, not spectator
+      console.log(`Player ${existingPlayer.name} reconnecting as player (not spectator) to lobby ${targetLobbyId}`);
       player = existingPlayer;
       replaceSocket(player, ws);
       player.lastDisconnectTime = null;
       player.connectionId = connectionId;
       player.connectionEpoch = (player.connectionEpoch || 0) + 1;
       ws.connectionEpoch = player.connectionEpoch;
-    } else {
-      let existingSpectator = lobby.spectators.find(s => s.id === msg.playerId);
-      if (existingSpectator) {
-        player = existingSpectator;
-        replaceSocket(player, ws);
-        player.lastDisconnectTime = null;
-        player.connectionId = connectionId;
-        player.connectionEpoch = (player.connectionEpoch || 0) + 1;
-        ws.connectionEpoch = player.connectionEpoch;
-        
-        // Restore wantsToJoinNextGame from the spectator object
-        if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
-          lobby.spectatorsWantingToJoin.push(player.id);
-        }
-        
-        // Also update from the lobby's spectatorsWantingToJoin list as backup
-        if (lobby.spectatorsWantingToJoin.includes(player.id) && !player.wantsToJoinNextGame) {
-          player.wantsToJoinNextGame = true;
-        }
-      } else {
-        const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
-        const baseName = msg.name || `Spectator-${Math.floor(Math.random() * 1000)}`;
-        let uniqueName = baseName.trim();
-        
-        if (isNameTakenInLobby(lobby, uniqueName)) {
-          uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
-          console.log(`Spectator name "${baseName}" was taken in lobby ${targetLobbyId}, changed to "${uniqueName}"`);
-        } else {
-          uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
-        }
-        
-        player = { 
-          id: msg.playerId, 
-          name: uniqueName, 
-          ws, 
-          isSpectator: true,
-          connectionId,
-          lastActionTime: Date.now(),
-          wantsToJoinNextGame: false,
-          connectionEpoch: 1
-        };
-        ws.connectionEpoch = 1;
-        lobby.spectators.push(player);
+      
+      // Send current game state
+      if (lobby.phase !== 'lobby') {
+        setTimeout(() => {
+          sendCurrentGameStateToPlayer(lobby, player);
+        }, 100);
       }
+      
+      ws.inLobby = true;
+      
+      ws.send(JSON.stringify({ 
+        type: 'lobbyAssigned', 
+        lobbyId: lobbyId,
+        isSpectator: false,
+        playerName: player.name,
+        yourName: player.name,
+        isOwner: lobby.owner === player.id,
+        impostorGuessOption: lobby.impostorGuessOption || false,
+        twoImpostorsOption: lobby.twoImpostorsOption || false
+      }));
+      
+      broadcast(lobby, { 
+        type: 'lobbyUpdate', 
+        players: lobby.players.map(p => ({ 
+          id: p.id, 
+          name: p.name, 
+          connected: p.ws?.readyState === 1 
+        })),
+        spectators: lobby.spectators.map(s => ({ 
+          id: s.id, 
+          name: s.name, 
+          connected: s.ws?.readyState === 1 
+        })),
+        owner: lobby.owner,
+        phase: lobby.phase,
+        impostorGuessOption: lobby.impostorGuessOption || false,
+        twoImpostorsOption: lobby.twoImpostorsOption || false
+      });
+      
+      broadcastLobbyList();
+      return;
+    }
+    
+    // Check for existing spectator
+    let existingSpectator = lobby.spectators.find(s => s.id === msg.playerId);
+    if (existingSpectator) {
+      player = existingSpectator;
+      replaceSocket(player, ws);
+      player.lastDisconnectTime = null;
+      player.connectionId = connectionId;
+      player.connectionEpoch = (player.connectionEpoch || 0) + 1;
+      ws.connectionEpoch = player.connectionEpoch;
+      
+      // Restore wantsToJoinNextGame from the spectator object
+      if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
+        lobby.spectatorsWantingToJoin.push(player.id);
+      }
+    } else {
+      // New spectator
+      const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
+      const baseName = msg.name || `Spectator-${Math.floor(Math.random() * 1000)}`;
+      let uniqueName = baseName.trim();
+      
+      if (isNameTakenInLobby(lobby, uniqueName)) {
+        uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
+        console.log(`Spectator name "${baseName}" was taken in lobby ${targetLobbyId}, changed to "${uniqueName}"`);
+      } else {
+        uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
+      }
+      
+      player = { 
+        id: msg.playerId, 
+        name: uniqueName, 
+        ws, 
+        isSpectator: true,
+        connectionId,
+        lastActionTime: Date.now(),
+        wantsToJoinNextGame: false,
+        connectionEpoch: 1
+      };
+      ws.connectionEpoch = 1;
+      lobby.spectators.push(player);
     }
 
     ws.inLobby = true;
 
-    // Send restart state update to the reconnected spectator
+    // Send current game state to spectator
+    if (lobby.phase !== 'lobby') {
+      setTimeout(() => {
+        sendCurrentGameStateToSpectator(lobby, player);
+      }, 100);
+    }
+
+    // Send restart state update if needed
     if (player.wantsToJoinNextGame) {
       setTimeout(() => {
         if (player.ws?.readyState === 1) {
@@ -1899,41 +1916,10 @@ wss.on('connection', (ws, req) => {
       }, 500);
     }
 
-    if (lobby.phase === 'results') {
-      setTimeout(() => {
-        try {
-          const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-          const winner = connectedPlayers.length >= 3 ? 'Game Ended' : 'Game Ended Early';
-          
-          ws.send(JSON.stringify({
-            type: 'gameEnd',
-            roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-            secretWord: lobby.word,
-            hint: lobby.hint,
-            winner
-          }));
-        } catch (err) {
-          console.log(`Error sending game state to new spectator ${player.name}`);
-        }
-      }, 100);
-    } else if (lobby.phase === 'impostorGuess') {
-      setTimeout(() => {
-        try {
-          ws.send(JSON.stringify({
-            type: 'impostorGuessPhase',
-            isImpostor: false,
-            guessEndsAt: lobby.impostorGuessEndsAt
-          }));
-        } catch (err) {
-          console.log(`Error sending impostor guess phase to spectator ${player.name}`);
-        }
-      }, 100);
-    }
-
     ws.send(JSON.stringify({ 
       type: 'lobbyAssigned', 
       lobbyId: lobbyId,
-      isSpectator: player.isSpectator || false,
+      isSpectator: true,
       playerName: player.name,
       yourName: player.name,
       isOwner: false,
@@ -1958,52 +1944,136 @@ wss.on('connection', (ws, req) => {
       impostorGuessOption: lobby.impostorGuessOption || false,
       twoImpostorsOption: lobby.twoImpostorsOption || false
     });
-
-    if (lobby.phase !== 'lobby' && lobby.phase !== 'results' && lobby.phase !== 'impostorGuess') {
-      setTimeout(() => {
-        try {
-          const roleToSend = player.role || 'spectator';
-          const wordToSend = player.role === 'civilian' ? lobby.word : 
-                            player.role === 'impostor' ? lobby.hint : 
-                            lobby.word;
-          
-          ws.send(JSON.stringify({
-            type: 'gameStart',
-            role: roleToSend,
-            word: wordToSend,
-            hint: roleToSend === 'spectator' ? lobby.hint : undefined,
-            isSpectator: roleToSend === 'spectator',
-            playerName: player.name
-          }));
-          
-          if (lobby.phase === 'round1' || lobby.phase === 'round2') {
-            const currentPlayer = lobby.players[lobby.turn];
-            if (currentPlayer) {
-              ws.send(JSON.stringify({
-                type: 'turnUpdate',
-                phase: lobby.phase,
-                round1: lobby.round1,
-                round2: lobby.round2,
-                currentPlayer: currentPlayer.name,
-                turnEndsAt: lobby.turnEndsAt,
-                isSpectator: roleToSend === 'spectator'
-              }));
-            }
-          } else if (lobby.phase === 'voting') {
-            ws.send(JSON.stringify({
-              type: 'startVoting',
-              players: lobby.players.map(p => p.name),
-              twoImpostorsMode: lobby.twoImpostorsOption || false,
-              isSpectator: roleToSend === 'spectator'
-            }));
-          }
-        } catch (err) {
-          console.log(`Error sending game state to ${player.name}`);
-        }
-      }, 100);
-    }
     
     broadcastLobbyList();
+  }
+
+  function sendCurrentGameStateToPlayer(lobby, player) {
+    try {
+      if (lobby.phase === 'results' || lobby.phase === 'impostorGuess') {
+        // Send game end state
+        const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+        const winner = connectedPlayers.length >= 3 ? 'Game Ended' : 'Game Ended Early';
+        
+        player.ws.send(JSON.stringify({
+          type: 'gameEnd',
+          roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+          secretWord: lobby.word,
+          hint: lobby.hint,
+          winner
+        }));
+      } else if (lobby.phase === 'impostorGuess') {
+        const impostors = lobby.players.filter(p => p.role === 'impostor');
+        if (player.role === 'impostor') {
+          player.ws.send(JSON.stringify({
+            type: 'impostorGuessPhase',
+            isImpostor: true,
+            guessEndsAt: lobby.impostorGuessEndsAt
+          }));
+        } else {
+          player.ws.send(JSON.stringify({
+            type: 'impostorGuessPhase',
+            isImpostor: false,
+            guessEndsAt: lobby.impostorGuessEndsAt
+          }));
+        }
+      } else {
+        // Send current game state
+        const roleToSend = player.role || 'spectator';
+        const wordToSend = player.role === 'civilian' ? lobby.word : 
+                          player.role === 'impostor' ? lobby.hint : 
+                          lobby.word;
+        
+        player.ws.send(JSON.stringify({
+          type: 'gameStart',
+          role: roleToSend,
+          word: wordToSend,
+          hint: roleToSend === 'spectator' ? lobby.hint : undefined,
+          isSpectator: false,
+          playerName: player.name
+        }));
+        
+        if (lobby.phase === 'round1' || lobby.phase === 'round2') {
+          const currentPlayer = lobby.players[lobby.turn];
+          if (currentPlayer) {
+            player.ws.send(JSON.stringify({
+              type: 'turnUpdate',
+              phase: lobby.phase,
+              round1: lobby.round1,
+              round2: lobby.round2,
+              currentPlayer: currentPlayer.name,
+              turnEndsAt: lobby.turnEndsAt,
+              isSpectator: false
+            }));
+          }
+        } else if (lobby.phase === 'voting') {
+          player.ws.send(JSON.stringify({
+            type: 'startVoting',
+            players: lobby.players.map(p => p.name),
+            twoImpostorsMode: lobby.twoImpostorsOption || false,
+            isSpectator: false
+          }));
+        }
+      }
+    } catch (err) {
+      console.log(`Error sending game state to reconnecting player ${player.name}:`, err.message);
+    }
+  }
+
+  function sendCurrentGameStateToSpectator(lobby, spectator) {
+    try {
+      if (lobby.phase === 'results' || lobby.phase === 'impostorGuess') {
+        const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+        const winner = connectedPlayers.length >= 3 ? 'Game Ended' : 'Game Ended Early';
+        
+        spectator.ws.send(JSON.stringify({
+          type: 'gameEnd',
+          roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+          secretWord: lobby.word,
+          hint: lobby.hint,
+          winner
+        }));
+      } else if (lobby.phase === 'impostorGuess') {
+        spectator.ws.send(JSON.stringify({
+          type: 'impostorGuessPhase',
+          isImpostor: false,
+          guessEndsAt: lobby.impostorGuessEndsAt
+        }));
+      } else {
+        spectator.ws.send(JSON.stringify({
+          type: 'gameStart',
+          role: 'spectator',
+          word: lobby.word,
+          hint: lobby.hint,
+          isSpectator: true,
+          playerName: spectator.name
+        }));
+        
+        if (lobby.phase === 'round1' || lobby.phase === 'round2') {
+          const currentPlayer = lobby.players[lobby.turn];
+          if (currentPlayer) {
+            spectator.ws.send(JSON.stringify({
+              type: 'turnUpdate',
+              phase: lobby.phase,
+              round1: lobby.round1,
+              round2: lobby.round2,
+              currentPlayer: currentPlayer.name,
+              turnEndsAt: lobby.turnEndsAt,
+              isSpectator: true
+            }));
+          }
+        } else if (lobby.phase === 'voting') {
+          spectator.ws.send(JSON.stringify({
+            type: 'startVoting',
+            players: lobby.players.map(p => p.name),
+            twoImpostorsMode: lobby.twoImpostorsOption || false,
+            isSpectator: true
+          }));
+        }
+      }
+    } catch (err) {
+      console.log(`Error sending game state to spectator ${spectator.name}:`, err.message);
+    }
   }
 
   function sendRestartUpdates(lobby) {
