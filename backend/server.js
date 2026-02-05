@@ -147,7 +147,9 @@ function removePlayerFromAllLobbies(playerId, reason = 'Joined another lobby') {
     if (wasRemoved) {
       removedFrom.push(lobbyId);
       
-      if (lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) {
+      // Only send restart updates if game is in results phase
+      if ((lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) && 
+          (lobby.phase === 'results' || lobby.phase === 'lobby')) {
         sendRestartUpdates(lobby);
       }
       
@@ -408,7 +410,7 @@ function startGame(lobby) {
   lobby.round1 = [];
   lobby.round2 = [];
   
-  // FIX: Clear restartReady completely when starting a new game
+  // Clear restartReady completely when starting a new game
   lobby.restartReady = [];
   
   lobby.turnTimeout = null;
@@ -684,7 +686,7 @@ function startImpostorGuessTimer(lobby) {
       });
       
       lobby.phase = 'results';
-  lobby.lastTimeBelowThreePlayers = null;
+      lobby.lastTimeBelowThreePlayers = null;
       lobby.turnEndsAt = null;
       lobby.impostorGuessTimeout = null;
       lobby.impostorGuesses = null;
@@ -778,7 +780,8 @@ function cleanupLobby(lobby, lobbyId) {
     checkGameEndConditions(lobby, lobbyId);
   }
   
-  if (restartStateChanged) {
+  // Only send restart updates during results phase, not during active games
+  if (restartStateChanged && (lobby.phase === 'results' || lobby.phase === 'lobby')) {
     sendRestartUpdates(lobby);
   }
   
@@ -1060,7 +1063,9 @@ wss.on('connection', (ws, req) => {
             endGameEarly(lobby, endGameReason);
           }
           
-          if (lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) {
+          // Only send restart updates during results phase
+          if ((lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) && 
+              (lobby.phase === 'results' || lobby.phase === 'lobby')) {
             sendRestartUpdates(lobby);
           }
           
@@ -1138,7 +1143,10 @@ wss.on('connection', (ws, req) => {
             }
           }
           
-          sendRestartUpdates(lobby);
+          // Only send restart updates during results phase
+          if (lobby.phase === 'results' || lobby.phase === 'lobby') {
+            sendRestartUpdates(lobby);
+          }
         }
         return;
       }
@@ -1559,7 +1567,10 @@ wss.on('connection', (ws, req) => {
           }
         }
         
-        sendRestartUpdates(lobby);
+        // Only send restart updates during results phase, not during active games
+        if (lobby.phase === 'results' || lobby.phase === 'lobby') {
+          sendRestartUpdates(lobby);
+        }
         
         const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
         
@@ -1681,7 +1692,7 @@ wss.on('connection', (ws, req) => {
     
     let existingPlayer = lobby.players.find(p => p.id === msg.playerId);
     if (existingPlayer) {
-      // FIX: Player is reconnecting - keep their existing game state
+      // Player is reconnecting - keep their existing game state
       player = existingPlayer;
       replaceSocket(player, ws);
       player.lastDisconnectTime = null;
@@ -1788,7 +1799,7 @@ wss.on('connection', (ws, req) => {
     // Check if this is a reconnection of an existing player
     const existingPlayer = lobby.players.find(p => p.id === msg.playerId);
     if (existingPlayer) {
-      // FIX: Player exists - reconnect them as player, not spectator
+      // Player exists - reconnect them as player, not spectator
       console.log(`Player ${existingPlayer.name} reconnecting as player (not spectator) to lobby ${targetLobbyId}`);
       player = existingPlayer;
       replaceSocket(player, ws);
@@ -1889,31 +1900,34 @@ wss.on('connection', (ws, req) => {
       }, 100);
     }
 
-    // Send restart state update if needed
-    if (player.wantsToJoinNextGame) {
-      setTimeout(() => {
-        if (player.ws?.readyState === 1) {
-          try {
-            const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-            const playersInGame = connectedPlayers.filter(p => p.role);
-            const readyConnectedPlayers = lobby.restartReady.filter(id => 
-              connectedPlayers.some(p => p.id === id)
-            );
-            
-            player.ws.send(JSON.stringify({
-              type: 'restartUpdate',
-              readyCount: readyConnectedPlayers.length,
-              totalPlayers: playersInGame.length,
-              spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
-              isSpectator: true,
-              wantsToJoin: player.wantsToJoinNextGame,
-              status: player.wantsToJoinNextGame ? 'joining' : 'waiting'
-            }));
-          } catch (err) {
-            console.log(`Failed to send restart update to reconnected spectator ${player.name}`);
+    // DO NOT send restart updates when spectator reconnects during active game
+    // This prevents triggering a new game restart
+    if (lobby.phase === 'results' || lobby.phase === 'lobby') {
+      if (player.wantsToJoinNextGame) {
+        setTimeout(() => {
+          if (player.ws?.readyState === 1) {
+            try {
+              const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+              const playersInGame = connectedPlayers.filter(p => p.role);
+              const readyConnectedPlayers = lobby.restartReady.filter(id => 
+                connectedPlayers.some(p => p.id === id)
+              );
+              
+              player.ws.send(JSON.stringify({
+                type: 'restartUpdate',
+                readyCount: readyConnectedPlayers.length,
+                totalPlayers: playersInGame.length,
+                spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
+                isSpectator: true,
+                wantsToJoin: player.wantsToJoinNextGame,
+                status: player.wantsToJoinNextGame ? 'joining' : 'waiting'
+              }));
+            } catch (err) {
+              console.log(`Failed to send restart update to reconnected spectator ${player.name}`);
+            }
           }
-        }
-      }, 500);
+        }, 500);
+      }
     }
 
     ws.send(JSON.stringify({ 
@@ -2077,6 +2091,12 @@ wss.on('connection', (ws, req) => {
   }
 
   function sendRestartUpdates(lobby) {
+    // IMPORTANT: Only send restart updates during results phase
+    if (lobby.phase !== 'results' && lobby.phase !== 'lobby') {
+      console.log(`Not sending restart updates during phase: ${lobby.phase}`);
+      return;
+    }
+    
     const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
     const playersInGame = connectedPlayers.filter(p => p.role);
     
