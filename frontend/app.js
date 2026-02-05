@@ -97,13 +97,12 @@ let lobbyListRefreshInterval = null;
 let impostorGuessTimer = null;
 let impostorGuessEndsAt = null;
 let isImpostor = false;
-let isEjectedImpostor = false; // NEW: Track if current player is ejected impostor who should guess
+let isEjectedImpostor = false;
 let isOwner = false;
 let impostorGuessOption = false;
 let twoImpostorsOption = false;
 let twoImpostorsMode = false;
 
-// NEW: Voting variables
 let selectedVotes = [];
 let hasSubmittedVotes = false;
 
@@ -121,7 +120,6 @@ function safeError(...args) {
   }
 }
 
-// Immediate reconnection function for page visibility changes
 function forceImmediateReconnect() {
   safeLog('Forcing immediate reconnect...');
   
@@ -143,16 +141,13 @@ function forceImmediateReconnect() {
       ws.onmessage = null;
       ws.close();
     } catch (err) {
-      // Ignore
     }
     ws = null;
   }
   
-  // Reset reconnection delay for immediate attempt
   reconnectDelay = 0;
   connectionAttempts = 0;
   
-  // Reconnect based on current state
   if (isSpectator && currentLobbyId) {
     joinAsSpectator();
   } else if (currentLobbyId) {
@@ -516,21 +511,17 @@ document.addEventListener('visibilitychange', () => {
     impostorGuessTimer = null;
   }
   
-  // IMPROVED: More aggressive reconnection when page becomes visible
   if (!document.hidden) {
     safeLog('Page became visible - checking connection status');
     
-    // If we're in a game and not connected, reconnect immediately
     if (currentLobbyId && (!ws || ws.readyState !== WebSocket.OPEN)) {
       safeLog('In game but not connected - forcing immediate reconnect');
       updateConnectionStatus('connecting', 'Reconnecting after page visibility...');
       
-      // Use a very short delay for visibility changes
       setTimeout(() => {
         forceImmediateReconnect();
-      }, 100); // Only 100ms delay for visibility changes
+      }, 100);
     } else if (ws && ws.readyState === WebSocket.OPEN) {
-      // Already connected, just send a ping to verify
       lastPingTime = Date.now();
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
@@ -565,7 +556,6 @@ function forceReconnect() {
       ws.onmessage = null;
       ws.close();
     } catch (err) {
-      // Ignore
     }
     ws = null;
   }
@@ -596,17 +586,14 @@ function exitLobby() {
     try {
       ws.send(JSON.stringify({ type: 'exitLobby' }));
     } catch (err) {
-      // Ignore send errors
     }
     
     try {
       ws.close(1000, 'User exited lobby');
     } catch (err) {
-      // Ignore close errors
     }
   }
   
-  // FIX: Reset all state variables
   isSpectator = false;
   currentLobbyId = null;
   connectionAttempts = 0;
@@ -622,7 +609,6 @@ function exitLobby() {
   isEjectedImpostor = false;
   isImpostor = false;
   
-  // Reset UI
   lobbyCard.classList.remove('hidden');
   gameCard.classList.add('hidden');
   gameHeader.classList.add('hidden');
@@ -701,7 +687,7 @@ function resetToLobbyScreen() {
   impostorGuessOption = false;
   twoImpostorsOption = false;
   twoImpostorsMode = false;
-  isEjectedImpostor = false; // Reset ejected impostor state
+  isEjectedImpostor = false;
   updateConnectionStatus('disconnected');
   
   stopTurnTimerAnimation();
@@ -828,7 +814,6 @@ function connect() {
         ws.onmessage = null;
         ws.close();
       } catch (err) {
-        // Ignore
       }
       ws = null;
     }
@@ -842,7 +827,6 @@ function connect() {
         try {
           ws.close();
         } catch (err) {
-          // Ignore
         }
       }
     }, 5000);
@@ -897,17 +881,6 @@ function connect() {
             playerId
           }));
         }
-        
-        // FIX: After joining, request current restart state if we're in a game
-        setTimeout(() => {
-          if (currentLobbyId && ws.readyState === WebSocket.OPEN) {
-            try {
-              ws.send(JSON.stringify({ type: 'restart' }));
-            } catch (err) {
-              safeError('Failed to request restart state on reconnect');
-            }
-          }
-        }, 500);
       }, 200);
     };
 
@@ -980,6 +953,11 @@ function connect() {
           impostorGuessOption = d.impostorGuessOption || false;
           twoImpostorsOption = d.twoImpostorsOption || false;
           
+          if (d.wantsToJoinNextGame) {
+            spectatorWantsToJoin = true;
+            spectatorHasClickedRestart = true;
+          }
+          
           lobbyCodeDisplay.textContent = d.lobbyId;
           
           if (document.getElementById('playerNameDisplay')) {
@@ -989,17 +967,6 @@ function connect() {
           if (isSpectator) {
             nickname.value = nickname.value.startsWith('👁️ ') ? nickname.value : `👁️ ${nickname.value.trim()}`;
             nickname.disabled = true;
-            
-            // FIX: Request restart state from server on reconnection
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              setTimeout(() => {
-                try {
-                  ws.send(JSON.stringify({ type: 'restart' }));
-                } catch (err) {
-                  safeError('Failed to request restart state');
-                }
-              }, 300);
-            }
           }
           
           exitLobbyBtn.style.display = 'block';
@@ -1049,7 +1016,6 @@ function connect() {
           }
         }
 
-        // FIXED: gameStart handler - preserve spectator join state
         if (d.type === 'gameStart') {
           lobbyCard.classList.add('hidden');
           gameCard.classList.remove('hidden');
@@ -1057,10 +1023,6 @@ function connect() {
           exitLobbyBtn.style.display = 'block';
           
           hasClickedRestart = false;
-          // FIX: DO NOT reset spectatorHasClickedRestart here - keep it across game phases
-          // spectatorHasClickedRestart = false;
-          spectatorWantsToJoin = false;
-          isEjectedImpostor = false; // Reset ejected impostor state
           
           if (d.playerName) {
             myPlayerName = d.playerName;
@@ -1069,7 +1031,6 @@ function connect() {
             }
           }
           
-          // FIX: If we're no longer a spectator, remove the eye icon
           if (!isSpectator && d.role !== 'spectator') {
             nickname.value = nickname.value.replace('👁️ ', '');
             nickname.disabled = false;
@@ -1084,8 +1045,6 @@ function connect() {
             restart.classList.remove('hidden');
             restart.disabled = false;
             restart.style.opacity = '1';
-            spectatorWantsToJoin = false;
-            // DO NOT reset: spectatorHasClickedRestart = false;
           } else {
             restart.innerText = 'Restart Game';
             restart.classList.add('hidden');
@@ -1127,7 +1086,7 @@ function connect() {
         }
 
         if (d.type === 'turnUpdate') {
-          isEjectedImpostor = false; // Reset ejected impostor state
+          isEjectedImpostor = false;
           
           const formatWord = (entry) => {
             if (entry.word === '' || entry.word === null || entry.word === undefined) {
@@ -1175,11 +1134,10 @@ function connect() {
         if (d.type === 'startVoting') {
           stopTurnTimerAnimation();
           stopImpostorGuessTimerAnimation();
-          isEjectedImpostor = false; // Reset ejected impostor state
+          isEjectedImpostor = false;
           
           twoImpostorsMode = d.twoImpostorsMode || false;
           
-          // Reset voting variables
           selectedVotes = [];
           hasSubmittedVotes = false;
           
@@ -1224,20 +1182,18 @@ function connect() {
           }
         }
 
-        // UPDATED: impostorGuessPhase handler for multiple impostors
         if (d.type === 'impostorGuessPhase') {
           stopTurnTimerAnimation();
           stopImpostorGuessTimerAnimation();
           
           isMyTurn = false;
           currentTurnEndsAt = null;
-          isEjectedImpostor = false; // Reset first
+          isEjectedImpostor = false;
           
           const ejectedNames = Array.isArray(d.ejected) ? d.ejected : [d.ejected];
           const ejectedText = ejectedNames.join(' and ');
           
           if (d.isImpostor) {
-            // Check if current player is among the ejected impostors
             const playerIsEjected = ejectedNames.some(name => name === myPlayerName);
             
             if (playerIsEjected) {
@@ -1258,7 +1214,6 @@ function connect() {
                 `<p>${isMultiple ? 'You and the other ejected impostor have' : 'You have'} 30 seconds to guess the secret word.</p>` +
                 '<p>If any ejected impostor guesses correctly, the impostors win!</p>';
             } else {
-              // Impostor but not ejected (in 2-impostor mode when only one was ejected)
               turnEl.textContent = 'Your teammate was voted out! They are guessing...';
               input.placeholder = 'Waiting for teammate to guess...';
               input.disabled = true;
@@ -1269,7 +1224,6 @@ function connect() {
                 '<p>If they guess correctly, the impostors win!</p>';
             }
           } else {
-            // Civilian or spectator view
             const isMultiple = ejectedNames.length > 1;
             
             if (isMultiple) {
@@ -1371,7 +1325,6 @@ function connect() {
           turnEl.textContent = 'Game Ended Early';
         }
 
-        // UPDATED: gameEnd handler with multiple impostor guesses support
         if (d.type === 'gameEnd') {
           stopTurnTimerAnimation();
           stopImpostorGuessTimerAnimation();
@@ -1409,14 +1362,12 @@ function connect() {
           });
           rolesHtml += '</div>';
           
-          // UPDATED: Votes display to handle array votes
           let votesHtml = '<div class="results-grid">';
           if (d.votes) {
             Object.entries(d.votes).forEach(([voter, votedFor]) => {
               const voterRole = d.roles.find(r => r.name === voter)?.role;
               const voterColor = voterRole === 'civilian' ? '#2ecc71' : '#e74c3c';
               
-              // Handle both single vote and array votes
               const votes = Array.isArray(votedFor) ? votedFor : [votedFor];
               
               votes.forEach(vote => {
@@ -1448,7 +1399,6 @@ function connect() {
             </div>`;
           }
           
-          // UPDATED: Impostor guess display for multiple impostors
           let impostorGuessHtml = '';
           if (d.impostorGuesses && Object.keys(d.impostorGuesses).length > 0) {
             let guessesHtml = '<div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; margin: 10px 0;">';
@@ -1477,7 +1427,6 @@ function connect() {
             guessesHtml += '</div>';
             impostorGuessHtml = guessesHtml;
           } else if (d.impostorGuess !== undefined) {
-            // Legacy support for single impostor guess
             const guessResult = d.impostorGuessCorrect ? 
               `<span style="color:#2ecc71">Correct guess! The impostors win!</span>` :
               `<span style="color:#e74c3c">Wrong guess! The impostor said: "${d.impostorGuess}"</span>`;
@@ -1497,7 +1446,6 @@ function connect() {
             </div>`;
           }
           
-          // Add reason for game end (e.g., timeout)
           let reasonHtml = '';
           if (d.reason === 'impostorGuessTimeout') {
             reasonHtml = `<div style="color:#f39c12; text-align:center; margin:10px 0;">
@@ -1553,33 +1501,27 @@ function connect() {
           turnEl.textContent = isSpectator ? 'Spectating - Game Over' : 'Game Over - Results';
         }
 
-        // FIXED: restartUpdate handler to better handle spectator state
         if (d.type === 'restartUpdate') {
           if (d.isSpectator) {
-            // IMPORTANT: Update spectator state based on server response
-            // If we've clicked join next game before, maintain that state
-            spectatorWantsToJoin = d.wantsToJoin || spectatorHasClickedRestart;
-            
-            if (spectatorHasClickedRestart && spectatorWantsToJoin) {
-              restart.innerText = `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
+            spectatorWantsToJoin = d.wantsToJoin || false;
+
+            if (d.wantsToJoin) {
+              spectatorHasClickedRestart = true;
+            }
+
+            if (spectatorWantsToJoin) {
+              restart.innerText =
+                `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
               restart.disabled = true;
               restart.style.opacity = '0.7';
-            } else if (spectatorWantsToJoin) {
-              restart.innerText = 'Joining next game...';
-              restart.disabled = false;
-              restart.style.opacity = '1';
             } else {
               restart.innerText = 'Join Next Game';
               restart.disabled = false;
               restart.style.opacity = '1';
-              // Only reset spectatorHasClickedRestart if the server explicitly says we're not wanting to join
-              if (!d.wantsToJoin) {
-                spectatorHasClickedRestart = false;
-              }
+              spectatorHasClickedRestart = false;
             }
           } else {
             if (d.playerRole) {
-              // Player with a role (from previous game)
               if (hasClickedRestart) {
                 restart.innerText = `Waiting for others... (${d.readyCount}/${d.totalPlayers})`;
                 restart.disabled = true;
@@ -1590,7 +1532,6 @@ function connect() {
                 restart.style.opacity = '1';
               }
             } else {
-              // Player without a role (new player waiting to join)
               if (hasClickedRestart) {
                 restart.innerText = `Joining next game... (${d.readyCount}/${d.totalPlayers} players ready)`;
                 restart.disabled = true;
@@ -1604,22 +1545,18 @@ function connect() {
           }
         }
 
-        // FIXED: roleChanged handler to properly remove eye icon
         if (d.type === 'roleChanged') {
           isSpectator = false;
           spectatorWantsToJoin = false;
           spectatorHasClickedRestart = false;
           hasClickedRestart = false;
           
-          // Use server-provided name if available
           if (d.playerName) {
             myPlayerName = d.playerName;
           } else {
-            // Fallback to cleaning the current nickname
             myPlayerName = nickname.value.replace('👁️ ', '').trim();
           }
           
-          // FIX: Properly remove eye icon and any spectator indicators
           nickname.value = myPlayerName;
           nickname.disabled = false;
           
@@ -1627,17 +1564,14 @@ function connect() {
             document.getElementById('playerNameDisplay').textContent = myPlayerName;
           }
           
-          // FIX: Update restart button for player
           restart.innerText = 'Restart Game';
           restart.disabled = false;
           restart.style.opacity = '1';
           
-          // Also update the restart button in the game if we're in results phase
           if (gameCard && !gameCard.classList.contains('hidden')) {
             restart.classList.remove('hidden');
           }
           
-          // FIX: Also update the nickname field in the lobby card if it's visible
           if (lobbyCard && !lobbyCard.classList.contains('hidden')) {
             nickname.value = myPlayerName;
           }
@@ -1690,7 +1624,6 @@ function connect() {
   }
 }
 
-// NEW: Vote count display function
 function updateVoteCountDisplay() {
   const voteCountElement = document.getElementById('voteCountDisplay');
   if (voteCountElement) {
@@ -1703,7 +1636,6 @@ function updateVoteCountDisplay() {
   }
 }
 
-// NEW: Vote function for both modes
 window.vote = (v, btnElement) => {
   if (isSpectator) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1763,7 +1695,6 @@ window.vote = (v, btnElement) => {
   }
 };
 
-// NEW: Submit votes function
 function submitVotes() {
   if (hasSubmittedVotes || selectedVotes.length === 0) return;
   
@@ -1792,7 +1723,6 @@ function submitVotes() {
   }
 }
 
-// NEW: Clear votes function
 window.clearVotes = () => {
   selectedVotes = [];
   hasSubmittedVotes = false;
@@ -1809,7 +1739,6 @@ window.clearVotes = () => {
   updateVoteCountDisplay();
 };
 
-// UPDATED: submitImpostorGuess function
 function submitImpostorGuess() {
   if (!input.value.trim() || !isEjectedImpostor) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1826,7 +1755,7 @@ function submitImpostorGuess() {
   input.disabled = true;
   submit.disabled = true;
   submit.textContent = 'Guess Submitted';
-  isEjectedImpostor = false; // Reset after submitting
+  isEjectedImpostor = false;
 }
 
 function submitWord() {
@@ -1946,7 +1875,6 @@ restart.onclick = () => {
   }
   
   if (isSpectator) {
-    // FIX: Only send restart if we haven't already clicked it
     if (!spectatorHasClickedRestart) {
       spectatorHasClickedRestart = true;
       spectatorWantsToJoin = true;
@@ -1956,7 +1884,6 @@ restart.onclick = () => {
       restart.style.opacity = '0.7';
     }
   } else {
-    // FIX: Only send restart if we haven't already clicked it
     if (!hasClickedRestart) {
       hasClickedRestart = true;
       ws.send(JSON.stringify({ type: 'restart' }));
@@ -2026,12 +1953,10 @@ window.addEventListener('beforeunload', () => {
     try {
       ws.send(JSON.stringify({ type: 'disconnecting' }));
     } catch (err) {
-      // Connection already closing
     }
   }
 });
 
-// Add CSS for guess results
 const style = document.createElement('style');
 style.textContent = `
   .guess-result {
