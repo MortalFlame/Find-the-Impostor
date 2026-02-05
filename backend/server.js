@@ -21,6 +21,11 @@ const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
 let lobbies = {};
 const SERVER_ID = crypto.randomUUID();
 
+// Grace period constants
+const LOBBY_GRACE_PERIOD = 60000; // 60 seconds for lobby
+const GAME_GRACE_PERIOD = 30000;   // 30 seconds for in-game disconnections
+const RESULTS_GRACE_PERIOD = 30000; // 30 seconds for results phase
+
 // Health endpoint for Render
 app.get('/health', (req, res) => {
   res.status(200).json({ 
@@ -299,13 +304,15 @@ function broadcast(lobby, data) {
 }
 
 function checkGameEndConditions(lobby, lobbyId) {
-  // Include voting phase in game end checks
+  // Don't check during lobby, results, or impostor guess phases
   if (lobby.phase === 'lobby' || lobby.phase === 'results' || lobby.phase === 'impostorGuess') {
     return false;
   }
   
   const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+  const totalPlayers = lobby.players.length;
   
+  // Check if impostor left
   const impostors = lobby.players.filter(p => p.role === 'impostor');
   const connectedImpostors = impostors.filter(p => p.ws?.readyState === 1);
   
@@ -318,16 +325,16 @@ function checkGameEndConditions(lobby, lobbyId) {
         disconnectedImpostors.forEach(impostor => {
           impostor.lastDisconnectTime = now;
         });
-        console.log(`Impostor(s) disconnected in lobby ${lobbyId}, starting 30s grace period`);
+        console.log(`Impostor(s) disconnected in lobby ${lobbyId}, starting ${GAME_GRACE_PERIOD/1000}s grace period`);
         return false;
       }
       
       const longDisconnectedImpostors = impostors.filter(p => 
-        p.ws?.readyState !== 1 && p.lastDisconnectTime && (now - p.lastDisconnectTime > 30000)
+        p.ws?.readyState !== 1 && p.lastDisconnectTime && (now - p.lastDisconnectTime > GAME_GRACE_PERIOD)
       );
       
       if (longDisconnectedImpostors.length > 0) {
-        console.log(`Game in lobby ${lobbyId} ending: impostor left for >30s`);
+        console.log(`Game in lobby ${lobbyId} ending: impostor left for >${GAME_GRACE_PERIOD/1000}s`);
         endGameEarly(lobby, 'impostor_left');
         return true;
       }
@@ -335,34 +342,40 @@ function checkGameEndConditions(lobby, lobbyId) {
       const earliestDisconnectTime = Math.min(...impostors
         .filter(p => p.lastDisconnectTime)
         .map(p => p.lastDisconnectTime));
-      const secondsRemaining = Math.ceil((30000 - (now - earliestDisconnectTime)) / 1000);
-      console.log(`Impostor(s) disconnected for ${30 - secondsRemaining}s, ${secondsRemaining}s remaining`);
+      const secondsRemaining = Math.ceil((GAME_GRACE_PERIOD - (now - earliestDisconnectTime)) / 1000);
+      console.log(`Impostor(s) disconnected for ${GAME_GRACE_PERIOD/1000 - secondsRemaining}s, ${secondsRemaining}s remaining`);
       return false;
     } else {
       impostors.forEach(p => p.lastDisconnectTime = null);
     }
   }
   
+  // Check if we have less than 3 connected players
   if (connectedPlayers.length < 3) {
     const now = Date.now();
     
     if (!lobby.lastTimeBelowThreePlayers) {
       lobby.lastTimeBelowThreePlayers = now;
-      console.log(`Game in lobby ${lobbyId} now has ${connectedPlayers.length} players, starting 30s grace period`);
+      console.log(`Game in lobby ${lobbyId} now has ${connectedPlayers.length} players, starting ${GAME_GRACE_PERIOD/1000}s grace period`);
       return false;
     }
     
-    if (now - lobby.lastTimeBelowThreePlayers > 30000) {
-      console.log(`Game in lobby ${lobbyId} ending: less than 3 players for 30+ seconds (${connectedPlayers.length})`);
+    if (now - lobby.lastTimeBelowThreePlayers > GAME_GRACE_PERIOD) {
+      console.log(`Game in lobby ${lobbyId} ending: less than 3 players for ${GAME_GRACE_PERIOD/1000}+ seconds (${connectedPlayers.length})`);
       endGameEarly(lobby, 'not_enough_players');
       return true;
     }
     
-    const secondsRemaining = Math.ceil((30000 - (now - lobby.lastTimeBelowThreePlayers)) / 1000);
+    const secondsRemaining = Math.ceil((GAME_GRACE_PERIOD - (now - lobby.lastTimeBelowThreePlayers)) / 1000);
     console.log(`Game in lobby ${lobbyId} has ${connectedPlayers.length} players, ${secondsRemaining}s remaining`);
     return false;
   } else {
     lobby.lastTimeBelowThreePlayers = null;
+  }
+  
+  // If we have at least 3 connected players and impostor is present, game can continue
+  if (connectedPlayers.length >= 3 && connectedImpostors.length > 0) {
+    return false; // Game can continue
   }
   
   return false;
@@ -395,7 +408,7 @@ function endGameEarly(lobby, reason) {
   lobby.ejectedPlayers = null;
   lobby.impostorGuesses = null;
   
-  // FIX: Send restart updates so spectators see their current join state
+  // Send restart updates so spectators see their current join state
   sendRestartUpdates(lobby);
   broadcastLobbyList();
 }
@@ -423,7 +436,6 @@ function startGame(lobby) {
 
   // CRITICAL FIX: Do NOT reset wantsToJoinNextGame for spectators when starting a new game
   // Keep the spectator's join intent across the entire game lifecycle
-  // We'll preserve it in results phase handling
   
   const { word, hint } = getRandomWord(lobby);
   lobby.word = word;
@@ -431,62 +443,58 @@ function startGame(lobby) {
 
   const shuffledConnectedPlayers = [...connectedPlayers].sort(() => Math.random() - 0.5);
   
+  // Reset votes for all players
   lobby.players.forEach(p => {
     p.vote = [];
     p.lastDisconnectTime = null;
   });
   
-  // IMPORTANT: Don't reset role for players - keep their existing role if they have one
-  // Only assign roles to players who don't already have them (new players)
-  if (lobby.twoImpostorsOption && shuffledConnectedPlayers.length >= 4) {
-    const impostorIndices = [0, 1];
-    shuffledConnectedPlayers.forEach((player, i) => {
-      // Only assign role if player doesn't have one
-      if (!player.role) {
-        player.role = impostorIndices.includes(i) ? 'impostor' : 'civilian';
-      }
-      player.vote = [];
-      player.lastActionTime = Date.now();
-      player.lastDisconnectTime = null;
-      try {
-        player.ws.send(JSON.stringify({
-          type: 'gameStart',
-          role: player.role,
-          word: player.role === 'civilian' ? word : hint,
-          playerName: player.name
-        }));
-      } catch (err) {
-        console.log(`Failed to send gameStart to ${player.name}`);
-      }
+  // Assign roles - only assign to players who don't already have roles
+  // This preserves roles for reconnecting players
+  const playersWithoutRoles = lobby.players.filter(p => !p.role && p.ws?.readyState === 1);
+  
+  if (lobby.twoImpostorsOption && playersWithoutRoles.length >= 4) {
+    // Assign 2 impostors
+    const impostorIndices = new Set();
+    while (impostorIndices.size < 2) {
+      impostorIndices.add(Math.floor(Math.random() * playersWithoutRoles.length));
+    }
+    
+    playersWithoutRoles.forEach((player, i) => {
+      player.role = impostorIndices.has(i) ? 'impostor' : 'civilian';
     });
   } else {
-    const impostorIndex = crypto.randomInt(shuffledConnectedPlayers.length);
-    shuffledConnectedPlayers.forEach((player, i) => {
-      // Only assign role if player doesn't have one
-      if (!player.role) {
-        player.role = i === impostorIndex ? 'impostor' : 'civilian';
-      }
-      player.vote = [];
-      player.lastActionTime = Date.now();
-      player.lastDisconnectTime = null;
+    // Assign 1 impostor
+    const impostorIndex = Math.floor(Math.random() * playersWithoutRoles.length);
+    playersWithoutRoles.forEach((player, i) => {
+      player.role = i === impostorIndex ? 'impostor' : 'civilian';
+    });
+  }
+  
+  // Send game start to all players
+  lobby.players.forEach(player => {
+    if (player.ws?.readyState === 1) {
       try {
+        const wordToSend = player.role === 'civilian' ? word : 
+                          player.role === 'impostor' ? hint : 
+                          word;
+        
         player.ws.send(JSON.stringify({
           type: 'gameStart',
           role: player.role,
-          word: player.role === 'civilian' ? word : hint,
+          word: wordToSend,
           playerName: player.name
         }));
       } catch (err) {
         console.log(`Failed to send gameStart to ${player.name}`);
       }
-    });
-  }
+    }
+  });
 
   // Send game state to spectators
   lobby.spectators.forEach(s => {
     if (s.ws?.readyState === 1) {
       try {
-        // IMPORTANT: Send current join state with the game start
         s.ws.send(JSON.stringify({
           type: 'gameStart',
           role: 'spectator',
@@ -526,6 +534,7 @@ function startGame(lobby) {
     }
   });
 
+  // Find first connected player for turn
   let firstConnectedIndex = 0;
   for (let i = 0; i < lobby.players.length; i++) {
     if (lobby.players[i].ws?.readyState === 1) {
@@ -727,7 +736,7 @@ function startImpostorGuessTimer(lobby) {
       lobby.impostorGuesses = null;
       lobby.ejectedPlayers = null;
       
-      // FIX: Send restart updates so spectators see their current join state
+      // Send restart updates so spectators see their current join state
       sendRestartUpdates(lobby);
       broadcastLobbyList();
     }, 30000)
@@ -739,10 +748,24 @@ function cleanupLobby(lobby, lobbyId) {
   let hasChanges = false;
   let restartStateChanged = false;
   
+  // Determine grace period based on phase
+  let playerGracePeriod, spectatorGracePeriod;
+  if (lobby.phase === 'lobby') {
+    playerGracePeriod = LOBBY_GRACE_PERIOD;
+    spectatorGracePeriod = LOBBY_GRACE_PERIOD;
+  } else if (lobby.phase === 'results') {
+    playerGracePeriod = RESULTS_GRACE_PERIOD;
+    spectatorGracePeriod = RESULTS_GRACE_PERIOD;
+  } else {
+    playerGracePeriod = GAME_GRACE_PERIOD;
+    spectatorGracePeriod = GAME_GRACE_PERIOD;
+  }
+  
+  // Clean up players
   lobby.players = lobby.players.filter(p => {
     if (p.ws?.readyState === 1) return true;
-    if (p.lastDisconnectTime && now - p.lastDisconnectTime > 60000) {
-      console.log(`Removing disconnected player after 60s: ${p.name}`);
+    if (p.lastDisconnectTime && now - p.lastDisconnectTime > playerGracePeriod) {
+      console.log(`Removing disconnected player after ${playerGracePeriod/1000}s: ${p.name}`);
       hasChanges = true;
       
       const restartIndex = lobby.restartReady.indexOf(p.id);
@@ -755,10 +778,11 @@ function cleanupLobby(lobby, lobbyId) {
     return true;
   });
   
+  // Clean up spectators
   lobby.spectators = lobby.spectators.filter(s => {
     if (s.ws?.readyState === 1) return true;
-    if (s.lastDisconnectTime && now - s.lastDisconnectTime > 60000) {
-      console.log(`Removing disconnected spectator after 60s: ${s.name}`);
+    if (s.lastDisconnectTime && now - s.lastDisconnectTime > spectatorGracePeriod) {
+      console.log(`Removing disconnected spectator after ${spectatorGracePeriod/1000}s: ${s.name}`);
       hasChanges = true;
       
       const wantingIndex = lobby.spectatorsWantingToJoin.indexOf(s.id);
@@ -792,8 +816,8 @@ function cleanupLobby(lobby, lobbyId) {
       // Check if we should start a grace period
       if (!lobby.emptyLobbyGracePeriodStart) {
         lobby.emptyLobbyGracePeriodStart = now;
-        console.log(`Starting 60s grace period for empty lobby ${lobbyId}`);
-      } else if (now - lobby.emptyLobbyGracePeriodStart > 60000) {
+        console.log(`Starting ${LOBBY_GRACE_PERIOD/1000}s grace period for empty lobby ${lobbyId}`);
+      } else if (now - lobby.emptyLobbyGracePeriodStart > LOBBY_GRACE_PERIOD) {
         // Grace period expired - delete the lobby
         console.log(`Grace period expired for empty lobby ${lobbyId}, deleting`);
         if (lobby.turnTimeout?.timer) {
@@ -813,11 +837,12 @@ function cleanupLobby(lobby, lobbyId) {
     lobby.emptyLobbyGracePeriodStart = null;
   }
   
+  // Only check game end conditions during active game phases
   if (lobby.phase !== 'lobby' && lobby.phase !== 'results' && lobby.phase !== 'impostorGuess') {
     checkGameEndConditions(lobby, lobbyId);
   }
   
-  // Only send restart updates during results phase, not during active games
+  // Only send restart updates during results or lobby phase
   if (restartStateChanged && (lobby.phase === 'results' || lobby.phase === 'lobby')) {
     sendRestartUpdates(lobby);
   }
@@ -1362,7 +1387,7 @@ wss.on('connection', (ws, req) => {
           // Check for duplicate votes
           const uniqueVotes = [...new Set(validVotes)];
           if (uniqueVotes.length !== 2) {
-            console.log(`Duplicate votes in 2-impostor mode: ${msg.vote}`);
+            console.log(`Duplicate votes in 2-impostors mode: ${msg.vote}`);
             return;
           }
           
@@ -1489,7 +1514,7 @@ wss.on('connection', (ws, req) => {
               lobby.turnTimeout = null;
             }
             
-            // FIX: Send restart updates so spectators see their current join state
+            // Send restart updates so spectators see their current join state
             sendRestartUpdates(lobby);
             broadcastLobbyList();
           } else {
@@ -1520,7 +1545,7 @@ wss.on('connection', (ws, req) => {
               lobby.turnTimeout = null;
             }
             
-            // FIX: Send restart updates so spectators see their current join state
+            // Send restart updates so spectators see their current join state
             sendRestartUpdates(lobby);
             broadcastLobbyList();
           }
@@ -1593,7 +1618,7 @@ wss.on('connection', (ws, req) => {
           lobby.impostorGuesses = null;
           lobby.ejectedPlayers = null;
           
-          // FIX: Send restart updates so spectators see their current join state
+          // Send restart updates so spectators see their current join state
           sendRestartUpdates(lobby);
           broadcastLobbyList();
         }
@@ -1619,22 +1644,31 @@ wss.on('connection', (ws, req) => {
         sendRestartUpdates(lobby);
         
         const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+        const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
         
-        // Only count players who were in the previous game AND are still connected
-        const playersInGame = connectedPlayers.filter(p => p.role);
+        // Get players who were in the previous game (have roles)
+        const playersInGame = lobby.players.filter(p => p.role);
         
-        // Don't wait for disconnected players - only count connected players
+        // Get connected players who were in the previous game and have pressed restart
         const readyConnectedPlayers = lobby.restartReady.filter(id => 
-          connectedPlayers.some(p => p.id === id)
+          connectedPlayers.some(p => p.id === id && p.role)
         );
         
-        console.log(`Restart check for lobby ${lobbyId}: ${playersInGame.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players`);
+        // Get spectators who want to join
+        const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
+          connectedSpectators.some(s => s.id === id)
+        );
         
-        // Game should only restart when ALL players from the previous round press restart
-        // AND there are at least 3 players with roles (from previous game)
-        if (playersInGame.length >= 3 && readyConnectedPlayers.length === playersInGame.length) {
-          console.log(`Restart condition met for lobby ${lobbyId}: All ${playersInGame.length} players from previous game are ready`);
+        console.log(`Restart check for lobby ${lobbyId}: ${playersInGame.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players, ${spectatorsWantingToJoin.length} spectators wanting to join`);
+        
+        // FIXED RESTART LOGIC: Game restarts when we have at least 3 ready participants
+        // (players from previous game who pressed restart + spectators who want to join)
+        const totalReady = readyConnectedPlayers.length + spectatorsWantingToJoin.length;
+        
+        if (totalReady >= 3) {
+          console.log(`Restart condition met for lobby ${lobbyId}: ${totalReady} participants ready (${readyConnectedPlayers.length} players + ${spectatorsWantingToJoin.length} spectators)`);
           
+          // Convert spectators who want to join into players
           const spectatorsToJoin = lobby.spectators.filter(s => 
             s.ws?.readyState === 1 && s.wantsToJoinNextGame
           );
@@ -1651,7 +1685,7 @@ wss.on('connection', (ws, req) => {
               spectator.vote = [];
               lobby.players.push(spectator);
               
-              // FIX: Ensure the name doesn't have spectator prefix or eye icon
+              // Ensure the name doesn't have spectator prefix or eye icon
               let cleanName = spectator.name;
               if (cleanName.startsWith('Spectator-')) {
                 // Keep as is for now, but we could extract original name
@@ -1662,7 +1696,7 @@ wss.on('connection', (ws, req) => {
                   type: 'roleChanged',
                   message: 'You are now a player for the next game!',
                   isSpectator: false,
-                  // FIX: Send the clean name back
+                  // Send the clean name back
                   playerName: cleanName
                 }));
               } catch (err) {
@@ -1672,9 +1706,10 @@ wss.on('connection', (ws, req) => {
           });
           
           lobby.spectatorsWantingToJoin = [];
+          lobby.restartReady = []; // Clear restart ready for new game
           startGame(lobby);
         } else {
-          console.log(`Restart condition NOT met: ${readyConnectedPlayers.length}/${playersInGame.length} players ready (need all ${playersInGame.length})`);
+          console.log(`Restart condition NOT met: ${totalReady}/3 ready participants`);
         }
       }
 
@@ -1917,16 +1952,26 @@ wss.on('connection', (ws, req) => {
       player.connectionEpoch = (player.connectionEpoch || 0) + 1;
       ws.connectionEpoch = player.connectionEpoch;
       
-      // IMPORTANT FIX: Restore wantsToJoinNextGame from the spectator object
-      // and also update the lobby's spectatorsWantingToJoin list
-      if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
-        lobby.spectatorsWantingToJoin.push(player.id);
+      // CRITICAL FIX: Properly restore wantsToJoinNextGame state
+      // First, check if the spectator was in the spectatorsWantingToJoin list
+      const wasWantingToJoin = lobby.spectatorsWantingToJoin.includes(player.id);
+      
+      // Restore the state from the spectator object
+      if (player.wantsToJoinNextGame === undefined) {
+        player.wantsToJoinNextGame = wasWantingToJoin;
       }
       
-      // Also ensure the spectator object reflects the lobby state
-      if (lobby.spectatorsWantingToJoin.includes(player.id)) {
-        player.wantsToJoinNextGame = true;
+      // Ensure the lobby state reflects the spectator's state
+      if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
+        lobby.spectatorsWantingToJoin.push(player.id);
+      } else if (!player.wantsToJoinNextGame && lobby.spectatorsWantingToJoin.includes(player.id)) {
+        const index = lobby.spectatorsWantingToJoin.indexOf(player.id);
+        if (index !== -1) {
+          lobby.spectatorsWantingToJoin.splice(index, 1);
+        }
       }
+      
+      console.log(`Spectator ${player.name} reconnected, wantsToJoinNextGame: ${player.wantsToJoinNextGame}`);
     } else {
       // New spectator
       const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
@@ -2165,14 +2210,22 @@ wss.on('connection', (ws, req) => {
       connectedPlayers.some(p => p.id === id)
     );
     
+    // Calculate total ready participants (players + spectators)
+    const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
+    const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
+      connectedSpectators.some(s => s.id === id)
+    );
+    
+    const totalReadyParticipants = readyConnectedPlayers.length + spectatorsWantingToJoin.length;
+    
     lobby.players.forEach(p => {
       if (p.ws?.readyState === 1) {
         try {
           p.ws.send(JSON.stringify({
             type: 'restartUpdate',
-            readyCount: readyConnectedPlayers.length,
+            readyCount: totalReadyParticipants, // Send total ready participants
             totalPlayers: playersInGame.length,
-            spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
+            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
             isSpectator: false,
             playerRole: p.role
           }));
@@ -2187,9 +2240,9 @@ wss.on('connection', (ws, req) => {
         try {
           s.ws.send(JSON.stringify({
             type: 'restartUpdate',
-            readyCount: readyConnectedPlayers.length,
+            readyCount: totalReadyParticipants, // Send total ready participants
             totalPlayers: playersInGame.length,
-            spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
+            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
             isSpectator: true,
             wantsToJoin: s.wantsToJoinNextGame || false,
             status: s.wantsToJoinNextGame ? 'joining' : 'waiting'
