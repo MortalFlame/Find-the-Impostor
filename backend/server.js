@@ -2088,18 +2088,18 @@ wss.on('connection', (ws, req) => {
       player.connectionEpoch = (player.connectionEpoch || 0) + 1;
       ws.connectionEpoch = player.connectionEpoch;
       
-      // FIXED: Always restore spectator intent from the server's source of truth
+      // Restore spectator intent from the server's source of truth
       const wasWantingToJoin = lobby.spectatorsWantingToJoin.includes(player.id);
       player.wantsToJoinNextGame = wasWantingToJoin;
-      
-      // Ensure the lobby state reflects the spectator's state (should already be true, but double-check)
-      if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
+
+      // Sync array and flag
+      if (player.wantsToJoinNextGame &&
+          !lobby.spectatorsWantingToJoin.includes(player.id)) {
         lobby.spectatorsWantingToJoin.push(player.id);
-      } else if (!player.wantsToJoinNextGame && lobby.spectatorsWantingToJoin.includes(player.id)) {
+      } else if (!player.wantsToJoinNextGame &&
+                 lobby.spectatorsWantingToJoin.includes(player.id)) {
         const index = lobby.spectatorsWantingToJoin.indexOf(player.id);
-        if (index !== -1) {
-          lobby.spectatorsWantingToJoin.splice(index, 1);
-        }
+        if (index !== -1) lobby.spectatorsWantingToJoin.splice(index, 1);
       }
       
       console.log(`Spectator ${player.name} reconnected, wantsToJoinNextGame: ${player.wantsToJoinNextGame}`);
@@ -2139,24 +2139,24 @@ wss.on('connection', (ws, req) => {
       }, 100);
     }
 
-    // Send restart state update to the reconnected spectator if in results phase
-    if ((lobby.phase === 'results' || lobby.phase === 'lobby') && player.wantsToJoinNextGame) {
+    // Send restart state update to the reconnected spectator if in results or lobby phase
+    if (lobby.phase === 'results' || lobby.phase === 'lobby') {
       setTimeout(() => {
         if (player.ws?.readyState === 1) {
           try {
             const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
             const playersInGame = connectedPlayers.filter(p => p.role);
-            const readyConnectedPlayers = lobby.restartReady.filter(id => 
+            const readyConnectedPlayers = lobby.restartReady.filter(id =>
               connectedPlayers.some(p => p.id === id)
             );
-            
+
             player.ws.send(JSON.stringify({
               type: 'restartUpdate',
               readyCount: readyConnectedPlayers.length,
               totalPlayers: playersInGame.length,
               spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
               isSpectator: true,
-              wantsToJoin: player.wantsToJoinNextGame,
+              wantsToJoin: player.wantsToJoinNextGame || false,
               status: player.wantsToJoinNextGame ? 'joining' : 'waiting'
             }));
           } catch (err) {
@@ -2166,15 +2166,16 @@ wss.on('connection', (ws, req) => {
       }, 500);
     }
 
-    ws.send(JSON.stringify({ 
-      type: 'lobbyAssigned', 
+    ws.send(JSON.stringify({
+      type: 'lobbyAssigned',
       lobbyId: lobbyId,
       isSpectator: true,
       playerName: player.name,
       yourName: player.name,
       isOwner: false,
       impostorGuessOption: lobby.impostorGuessOption || false,
-      twoImpostorsOption: lobby.twoImpostorsOption || false
+      twoImpostorsOption: lobby.twoImpostorsOption || false,
+      wantsToJoinNextGame: player.wantsToJoinNextGame || false
     }));
     
     broadcast(lobby, { 
