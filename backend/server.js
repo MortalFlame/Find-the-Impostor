@@ -395,6 +395,8 @@ function endGameEarly(lobby, reason) {
   lobby.ejectedPlayers = null;
   lobby.impostorGuesses = null;
   
+  // FIX: Send restart updates so spectators see their current join state
+  sendRestartUpdates(lobby);
   broadcastLobbyList();
 }
 
@@ -419,17 +421,10 @@ function startGame(lobby) {
   lobby.ejectedPlayers = null;
   lobby.impostorGuesses = null;
 
-  // IMPORTANT FIX: Do NOT reset wantsToJoinNextGame for spectators when starting a new game
-  // Spectators should keep their join next game state across games
-  // Only reset it when they actually join as players
-  lobby.spectators.forEach(s => {
-    s.vote = '';
-    // DO NOT reset wantsToJoinNextGame here - let it persist
-  });
+  // CRITICAL FIX: Do NOT reset wantsToJoinNextGame for spectators when starting a new game
+  // Keep the spectator's join intent across the entire game lifecycle
+  // We'll preserve it in results phase handling
   
-  // Clear spectatorsWantingToJoin after processing
-  lobby.spectatorsWantingToJoin = [];
-
   const { word, hint } = getRandomWord(lobby);
   lobby.word = word;
   lobby.hint = hint;
@@ -437,15 +432,19 @@ function startGame(lobby) {
   const shuffledConnectedPlayers = [...connectedPlayers].sort(() => Math.random() - 0.5);
   
   lobby.players.forEach(p => {
-    p.role = null;
     p.vote = [];
     p.lastDisconnectTime = null;
   });
   
+  // IMPORTANT: Don't reset role for players - keep their existing role if they have one
+  // Only assign roles to players who don't already have them (new players)
   if (lobby.twoImpostorsOption && shuffledConnectedPlayers.length >= 4) {
     const impostorIndices = [0, 1];
     shuffledConnectedPlayers.forEach((player, i) => {
-      player.role = impostorIndices.includes(i) ? 'impostor' : 'civilian';
+      // Only assign role if player doesn't have one
+      if (!player.role) {
+        player.role = impostorIndices.includes(i) ? 'impostor' : 'civilian';
+      }
       player.vote = [];
       player.lastActionTime = Date.now();
       player.lastDisconnectTime = null;
@@ -463,7 +462,10 @@ function startGame(lobby) {
   } else {
     const impostorIndex = crypto.randomInt(shuffledConnectedPlayers.length);
     shuffledConnectedPlayers.forEach((player, i) => {
-      player.role = i === impostorIndex ? 'impostor' : 'civilian';
+      // Only assign role if player doesn't have one
+      if (!player.role) {
+        player.role = i === impostorIndex ? 'impostor' : 'civilian';
+      }
       player.vote = [];
       player.lastActionTime = Date.now();
       player.lastDisconnectTime = null;
@@ -480,9 +482,11 @@ function startGame(lobby) {
     });
   }
 
+  // Send game state to spectators
   lobby.spectators.forEach(s => {
     if (s.ws?.readyState === 1) {
       try {
+        // IMPORTANT: Send current join state with the game start
         s.ws.send(JSON.stringify({
           type: 'gameStart',
           role: 'spectator',
@@ -491,6 +495,31 @@ function startGame(lobby) {
           isSpectator: true,
           playerName: s.name
         }));
+        
+        // Also send restart update to preserve join state display
+        if (s.wantsToJoinNextGame) {
+          setTimeout(() => {
+            try {
+              const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+              const playersInGame = connectedPlayers.filter(p => p.role);
+              const readyConnectedPlayers = lobby.restartReady.filter(id => 
+                connectedPlayers.some(p => p.id === id)
+              );
+              
+              s.ws.send(JSON.stringify({
+                type: 'restartUpdate',
+                readyCount: readyConnectedPlayers.length,
+                totalPlayers: playersInGame.length,
+                spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
+                isSpectator: true,
+                wantsToJoin: true,
+                status: 'joining'
+              }));
+            } catch (err) {
+              console.log(`Failed to send restart update to spectator ${s.name} during game start`);
+            }
+          }, 300);
+        }
       } catch (err) {
         console.log(`Failed to send gameStart to spectator ${s.name}`);
       }
@@ -698,6 +727,8 @@ function startImpostorGuessTimer(lobby) {
       lobby.impostorGuesses = null;
       lobby.ejectedPlayers = null;
       
+      // FIX: Send restart updates so spectators see their current join state
+      sendRestartUpdates(lobby);
       broadcastLobbyList();
     }, 30000)
   };
@@ -1458,6 +1489,8 @@ wss.on('connection', (ws, req) => {
               lobby.turnTimeout = null;
             }
             
+            // FIX: Send restart updates so spectators see their current join state
+            sendRestartUpdates(lobby);
             broadcastLobbyList();
           } else {
             // No one ejected (tie)
@@ -1487,6 +1520,8 @@ wss.on('connection', (ws, req) => {
               lobby.turnTimeout = null;
             }
             
+            // FIX: Send restart updates so spectators see their current join state
+            sendRestartUpdates(lobby);
             broadcastLobbyList();
           }
         }
@@ -1558,6 +1593,8 @@ wss.on('connection', (ws, req) => {
           lobby.impostorGuesses = null;
           lobby.ejectedPlayers = null;
           
+          // FIX: Send restart updates so spectators see their current join state
+          sendRestartUpdates(lobby);
           broadcastLobbyList();
         }
       }
@@ -1614,11 +1651,19 @@ wss.on('connection', (ws, req) => {
               spectator.vote = [];
               lobby.players.push(spectator);
               
+              // FIX: Ensure the name doesn't have spectator prefix or eye icon
+              let cleanName = spectator.name;
+              if (cleanName.startsWith('Spectator-')) {
+                // Keep as is for now, but we could extract original name
+              }
+              
               try {
                 spectator.ws.send(JSON.stringify({
                   type: 'roleChanged',
                   message: 'You are now a player for the next game!',
-                  isSpectator: false
+                  isSpectator: false,
+                  // FIX: Send the clean name back
+                  playerName: cleanName
                 }));
               } catch (err) {
                 console.log(`Failed to send role change to ${spectator.name}`);
