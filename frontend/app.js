@@ -1265,6 +1265,13 @@ function connect() {
           const winnerColor = '#f39c12';
           let reasonText = '';
           
+          if (d.isSpectator && d.wantsToJoinNextGame !== undefined) {
+    spectatorWantsToJoin = d.wantsToJoinNextGame;
+    if (d.wantsToJoinNextGame) {
+      spectatorHasClickedRestart = true;
+    }
+  }
+          
           if (d.reason === 'not_enough_players') {
             reasonText = `<div style="color:#f39c12; text-align:center; margin-bottom:10px;">
               <i>Game ended: Not enough players (minimum 3 required)</i>
@@ -1354,6 +1361,14 @@ function connect() {
           } else {
             winnerColor = '#95a5a6';
           }
+          
+          // FIX: Preserve spectator join state from server
+  if (d.isSpectator && d.wantsToJoinNextGame !== undefined) {
+    spectatorWantsToJoin = d.wantsToJoinNextGame;
+    if (d.wantsToJoinNextGame) {
+      spectatorHasClickedRestart = true;
+    }
+  }
           
           const myRoleInfo = d.roles.find(r => r.name === myPlayerName);
           
