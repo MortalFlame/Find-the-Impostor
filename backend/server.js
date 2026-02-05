@@ -434,7 +434,11 @@ function startGame(lobby) {
 
   const shuffledConnectedPlayers = [...connectedPlayers].sort(() => Math.random() - 0.5);
   
-  lobby.players.forEach(p => p.role = null);
+  lobby.players.forEach(p => {
+    p.role = null;
+    p.vote = [];
+    p.lastDisconnectTime = null;
+  });
   
   if (lobby.twoImpostorsOption && shuffledConnectedPlayers.length >= 4) {
     const impostorIndices = [0, 1];
@@ -1129,6 +1133,9 @@ wss.on('connection', (ws, req) => {
       
       if (isSpectator) {
         if (msg.type === 'restart') {
+          // Only allow restart in results phase
+          if (lobby.phase !== 'results' && lobby.phase !== 'lobby') return;
+          
           // Toggle wantsToJoinNextGame
           player.wantsToJoinNextGame = !player.wantsToJoinNextGame;
           
@@ -1143,10 +1150,7 @@ wss.on('connection', (ws, req) => {
             }
           }
           
-          // Only send restart updates during results phase
-          if (lobby.phase === 'results' || lobby.phase === 'lobby') {
-            sendRestartUpdates(lobby);
-          }
+          sendRestartUpdates(lobby);
         }
         return;
       }
@@ -1557,6 +1561,12 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'restart') {
+        // Only allow restart in results phase
+        if (lobby.phase !== 'results' && lobby.phase !== 'lobby') {
+          console.log(`Ignoring restart message during phase: ${lobby.phase}`);
+          return;
+        }
+        
         if (!isSpectator && player.role && !lobby.restartReady.includes(player.id)) {
           lobby.restartReady.push(player.id);
         } else if (!isSpectator && player.role && lobby.restartReady.includes(player.id)) {
@@ -1567,10 +1577,7 @@ wss.on('connection', (ws, req) => {
           }
         }
         
-        // Only send restart updates during results phase, not during active games
-        if (lobby.phase === 'results' || lobby.phase === 'lobby') {
-          sendRestartUpdates(lobby);
-        }
+        sendRestartUpdates(lobby);
         
         const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
         
@@ -1702,6 +1709,9 @@ wss.on('connection', (ws, req) => {
       ws.connectionEpoch = player.connectionEpoch;
       
       console.log(`Player ${player.name} reconnected to lobby ${targetLobbyId}, phase: ${lobby.phase}, role: ${player.role || 'none'}`);
+      
+      // IMPORTANT: Do NOT send restart updates when reconnecting during active game
+      // This prevents triggering the restart condition check
       
       // Send the current game state to the reconnecting player
       if (lobby.phase !== 'lobby') {
@@ -1900,36 +1910,9 @@ wss.on('connection', (ws, req) => {
       }, 100);
     }
 
-    // DO NOT send restart updates when spectator reconnects during active game
+    // DO NOT send restart updates when spectator reconnects
     // This prevents triggering a new game restart
-    if (lobby.phase === 'results' || lobby.phase === 'lobby') {
-      if (player.wantsToJoinNextGame) {
-        setTimeout(() => {
-          if (player.ws?.readyState === 1) {
-            try {
-              const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-              const playersInGame = connectedPlayers.filter(p => p.role);
-              const readyConnectedPlayers = lobby.restartReady.filter(id => 
-                connectedPlayers.some(p => p.id === id)
-              );
-              
-              player.ws.send(JSON.stringify({
-                type: 'restartUpdate',
-                readyCount: readyConnectedPlayers.length,
-                totalPlayers: playersInGame.length,
-                spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
-                isSpectator: true,
-                wantsToJoin: player.wantsToJoinNextGame,
-                status: player.wantsToJoinNextGame ? 'joining' : 'waiting'
-              }));
-            } catch (err) {
-              console.log(`Failed to send restart update to reconnected spectator ${player.name}`);
-            }
-          }
-        }, 500);
-      }
-    }
-
+    
     ws.send(JSON.stringify({ 
       type: 'lobbyAssigned', 
       lobbyId: lobbyId,
@@ -2091,7 +2074,7 @@ wss.on('connection', (ws, req) => {
   }
 
   function sendRestartUpdates(lobby) {
-    // IMPORTANT: Only send restart updates during results phase
+    // IMPORTANT: Only send restart updates during results or lobby phase
     if (lobby.phase !== 'results' && lobby.phase !== 'lobby') {
       console.log(`Not sending restart updates during phase: ${lobby.phase}`);
       return;
