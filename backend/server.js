@@ -26,6 +26,9 @@ const LOBBY_GRACE_PERIOD = 60000; // 60 seconds for lobby
 const GAME_GRACE_PERIOD = 30000;   // 30 seconds for in-game disconnections
 const RESULTS_GRACE_PERIOD = 30000; // 30 seconds for results phase
 
+// Connection rate limiting
+const connectionRateLimit = new Map(); // ip -> {count, resetTime}
+
 // Health endpoint for Render
 app.get('/health', (req, res) => {
   res.status(200).json({ 
@@ -37,6 +40,22 @@ app.get('/health', (req, res) => {
     )
   });
 });
+
+// Rate limiting middleware for WebSocket connections
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const limitInfo = connectionRateLimit.get(ip) || { count: 0, resetTime: now + 60000 };
+  
+  if (now > limitInfo.resetTime) {
+    limitInfo.count = 0;
+    limitInfo.resetTime = now + 60000;
+  }
+  
+  limitInfo.count++;
+  connectionRateLimit.set(ip, limitInfo);
+  
+  return limitInfo.count <= 100; // Allow 100 connections per minute per IP
+}
 
 // Function to broadcast lobby list to all clients
 function broadcastLobbyList() {
@@ -220,12 +239,25 @@ function isNameTakenInLobby(lobby, nameToCheck, excludePlayerId = null) {
   );
 }
 
+// Enhanced input sanitization
+function sanitizeInput(input, maxLength = 50) {
+  if (typeof input !== 'string') return '';
+  
+  // Remove any HTML/script tags and limit length
+  return input
+    .replace(/<[^>]*>?/gm, '')
+    .replace(/[<>]/g, '')
+    .substring(0, maxLength)
+    .trim();
+}
+
 // SIMPLE: True random word selection with no repeats until all used
 function getRandomWord(lobby) {
   if (!lobby.availableWords || lobby.availableWords.length === 0) {
     lobby.availableWords = [...words];
     lobby.usedWords = [];
     
+    // Shuffle the words
     for (let i = lobby.availableWords.length - 1; i > 0; i--) {
       const j = crypto.randomInt(i + 1);
       [lobby.availableWords[i], lobby.availableWords[j]] = [lobby.availableWords[j], lobby.availableWords[i]];
@@ -239,6 +271,11 @@ function getRandomWord(lobby) {
   
   lobby.availableWords.splice(randomIndex, 1);
   lobby.usedWords.push(selectedWord);
+  
+  // Limit usedWords array to prevent memory issues (keep last 100)
+  if (lobby.usedWords.length > 100) {
+    lobby.usedWords = lobby.usedWords.slice(-100);
+  }
   
   console.log(`Selected word: "${selectedWord.word}", ${lobby.availableWords.length} remaining, ${lobby.usedWords.length} used`);
   
@@ -312,45 +349,44 @@ function checkGameEndConditions(lobby, lobbyId) {
   const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
   const totalPlayers = lobby.players.length;
   
-  // Check if impostor left
+  // Check if impostor left AND we don't have an impostor
   const impostors = lobby.players.filter(p => p.role === 'impostor');
   const connectedImpostors = impostors.filter(p => p.ws?.readyState === 1);
   
-  if (impostors.length > 0) {
-    if (connectedImpostors.length < impostors.length) {
-      const now = Date.now();
-      
-      const disconnectedImpostors = impostors.filter(p => p.ws?.readyState !== 1 && !p.lastDisconnectTime);
-      if (disconnectedImpostors.length > 0) {
-        disconnectedImpostors.forEach(impostor => {
-          impostor.lastDisconnectTime = now;
-        });
-        console.log(`Impostor(s) disconnected in lobby ${lobbyId}, starting ${GAME_GRACE_PERIOD/1000}s grace period`);
-        return false;
-      }
-      
-      const longDisconnectedImpostors = impostors.filter(p => 
-        p.ws?.readyState !== 1 && p.lastDisconnectTime && (now - p.lastDisconnectTime > GAME_GRACE_PERIOD)
-      );
-      
-      if (longDisconnectedImpostors.length > 0) {
-        console.log(`Game in lobby ${lobbyId} ending: impostor left for >${GAME_GRACE_PERIOD/1000}s`);
-        endGameEarly(lobby, 'impostor_left');
-        return true;
-      }
-      
-      const earliestDisconnectTime = Math.min(...impostors
-        .filter(p => p.lastDisconnectTime)
-        .map(p => p.lastDisconnectTime));
-      const secondsRemaining = Math.ceil((GAME_GRACE_PERIOD - (now - earliestDisconnectTime)) / 1000);
-      console.log(`Impostor(s) disconnected for ${GAME_GRACE_PERIOD/1000 - secondsRemaining}s, ${secondsRemaining}s remaining`);
+  // Check if we have at least one impostor connected (required for game to continue)
+  if (connectedImpostors.length === 0) {
+    const now = Date.now();
+    
+    const disconnectedImpostors = impostors.filter(p => p.ws?.readyState !== 1 && !p.lastDisconnectTime);
+    if (disconnectedImpostors.length > 0) {
+      disconnectedImpostors.forEach(impostor => {
+        impostor.lastDisconnectTime = now;
+      });
+      console.log(`Impostor(s) disconnected in lobby ${lobbyId}, starting ${GAME_GRACE_PERIOD/1000}s grace period`);
       return false;
-    } else {
-      impostors.forEach(p => p.lastDisconnectTime = null);
     }
+    
+    const longDisconnectedImpostors = impostors.filter(p => 
+      p.ws?.readyState !== 1 && p.lastDisconnectTime && (now - p.lastDisconnectTime > GAME_GRACE_PERIOD)
+    );
+    
+    if (longDisconnectedImpostors.length > 0) {
+      console.log(`Game in lobby ${lobbyId} ending: no impostors connected for >${GAME_GRACE_PERIOD/1000}s`);
+      endGameEarly(lobby, 'impostor_left');
+      return true;
+    }
+    
+    const earliestDisconnectTime = Math.min(...impostors
+      .filter(p => p.lastDisconnectTime)
+      .map(p => p.lastDisconnectTime));
+    const secondsRemaining = Math.ceil((GAME_GRACE_PERIOD - (now - earliestDisconnectTime)) / 1000);
+    console.log(`Impostor(s) disconnected for ${GAME_GRACE_PERIOD/1000 - secondsRemaining}s, ${secondsRemaining}s remaining`);
+    return false;
+  } else {
+    impostors.forEach(p => p.lastDisconnectTime = null);
   }
   
-  // Check if we have less than 3 connected players
+  // Check if we have less than 3 connected players OR less than 3 players with an impostor
   if (connectedPlayers.length < 3) {
     const now = Date.now();
     
@@ -373,7 +409,7 @@ function checkGameEndConditions(lobby, lobbyId) {
     lobby.lastTimeBelowThreePlayers = null;
   }
   
-  // If we have at least 3 connected players and impostor is present, game can continue
+  // If we have at least 3 connected players and at least one impostor is present, game can continue
   if (connectedPlayers.length >= 3 && connectedImpostors.length > 0) {
     return false; // Game can continue
   }
@@ -565,13 +601,15 @@ function startTurnTimer(lobby) {
   const currentPlayer = lobby.players[lobby.turn];
   if (!currentPlayer) return;
   
-  setTurnEndTime(lobby);
+  const turnStartTime = Date.now();
+  lobby.turnEndsAt = turnStartTime + 30000;
   
   lobby.turnTimeout = {
     playerId: currentPlayer.id,
     timer: setTimeout(() => {
       console.log(`Turn timeout for player ${currentPlayer.name}`);
       
+      // Check if it's still this player's turn (they might have submitted)
       if (lobby.players[lobby.turn]?.id === currentPlayer.id) {
         skipCurrentPlayer(lobby, true);
       }
@@ -627,6 +665,12 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
   
   if (attempts >= lobby.players.length) {
     console.log('No connected players found to take turn');
+    // Check if we should end the game early
+    const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+    if (connectedPlayers.length === 0) {
+      console.log('All players disconnected during turn, ending game early');
+      endGameEarly(lobby, 'all_players_disconnected');
+    }
     return;
   }
   
@@ -880,7 +924,12 @@ setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
       console.log('Terminating dead connection');
-      return ws.terminate();
+      try {
+        ws.terminate();
+      } catch (err) {
+        // Ignore terminate errors
+      }
+      return;
     }
     ws.isAlive = false;
     try {
@@ -891,9 +940,26 @@ setInterval(() => {
   });
 }, 30000);
 
+// Clean up connection rate limit map periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, info] of connectionRateLimit.entries()) {
+    if (now > info.resetTime) {
+      connectionRateLimit.delete(ip);
+    }
+  }
+}, 60000);
+
 wss.on('connection', (ws, req) => {
   const clientIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   console.log(`New connection from: ${clientIP}`);
+  
+  // Rate limiting check
+  if (!checkRateLimit(clientIP.split(',')[0].trim())) {
+    console.log(`Rate limit exceeded for IP: ${clientIP}`);
+    ws.close(1008, 'Rate limit exceeded');
+    return;
+  }
   
   ws.isAlive = true;
   ws.on('pong', () => {
@@ -927,6 +993,12 @@ wss.on('connection', (ws, req) => {
     
     try {
       const msg = JSON.parse(raw.toString());
+      
+      // Basic message validation
+      if (!msg || typeof msg !== 'object' || !msg.type) {
+        console.log('Invalid message format received');
+        return;
+      }
       
       ws.isAlive = true;
 
@@ -970,6 +1042,14 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'joinLobby') {
+        if (!msg.playerId || typeof msg.playerId !== 'string') {
+          ws.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Invalid player ID' 
+          }));
+          return;
+        }
+        
         lobbyId = msg.lobbyId || Math.floor(1000 + Math.random() * 9000).toString();
         
         // Check if player is trying to rejoin a lobby they're already in
@@ -1082,7 +1162,7 @@ wss.on('connection', (ws, req) => {
           if (wasGameInProgress && !player.isSpectator) {
             const connectedPlayersBeforeExit = lobby.players.filter(p => p.ws?.readyState === 1).length;
             
-            // If player is impostor, end game immediately
+            // If player is impostor, end game immediately (FIX: No grace period for manual exit)
             if (player.role === 'impostor') {
               shouldEndGameImmediately = true;
               endGameReason = 'impostor_left';
@@ -1119,10 +1199,20 @@ wss.on('connection', (ws, req) => {
             }
           }
           
-          // End game immediately if conditions are met
+          // End game immediately if conditions are met (FIX: No grace period for manual exit)
           if (shouldEndGameImmediately && lobby.phase !== 'results' && lobby.phase !== 'lobby') {
             console.log(`Game ending immediately due to player exit: ${endGameReason}`);
             endGameEarly(lobby, endGameReason);
+          } else if (wasGameInProgress && !shouldEndGameImmediately) {
+            // Check game conditions but with immediate check (no grace period for manual exit)
+            const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+            const connectedImpostors = connectedPlayers.filter(p => p.role === 'impostor');
+            
+            // Immediate check: if less than 3 players or no impostor, end game immediately
+            if (connectedPlayers.length < 3 || connectedImpostors.length === 0) {
+              console.log(`Game ending immediately after manual exit: ${connectedPlayers.length} players, ${connectedImpostors.length} impostors`);
+              endGameEarly(lobby, connectedPlayers.length < 3 ? 'not_enough_players' : 'impostor_left');
+            }
           }
           
           // Only send restart updates during results phase
@@ -1146,7 +1236,7 @@ wss.on('connection', (ws, req) => {
               console.log(`Lobby ${lobbyId} is empty but game is in progress (phase: ${lobby.phase}). Keeping for grace period.`);
             }
           } else if (!shouldEndGameImmediately && wasGameInProgress) {
-            // Only check game end conditions if we didn't already end the game
+            // Check game end conditions (this will apply grace period for disconnections, not manual exits)
             checkGameEndConditions(lobby, lobbyId);
             
             broadcast(lobby, { 
@@ -1194,7 +1284,7 @@ wss.on('connection', (ws, req) => {
           // Only allow restart in results phase
           if (lobby.phase !== 'results' && lobby.phase !== 'lobby') return;
           
-          // Toggle wantsToJoinNextGame
+          // Toggle wantsToJoinNextGame (FIX: spectators don't vote, they only join)
           player.wantsToJoinNextGame = !player.wantsToJoinNextGame;
           
           if (player.wantsToJoinNextGame) {
@@ -1285,10 +1375,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        const sanitizedWord = String(msg.word)
-          .replace(/[<>]/g, '')
-          .substring(0, 50)
-          .trim();
+        const sanitizedWord = sanitizeInput(msg.word, 50);
 
         if (!sanitizedWord) {
           console.log(`Player ${player.name} submitted empty/only HTML`);
@@ -1412,15 +1499,31 @@ wss.on('connection', (ws, req) => {
           
           if (lobby.twoImpostorsOption) {
             // In 2-impostor mode, eject 2 players with most votes
+            // Handle ties: if tie for second place, both get ejected (could be 3+)
             const sortedVotes = Object.entries(voteCounts)
               .sort((a, b) => {
                 if (b[1] !== a[1]) return b[1] - a[1];
                 return a[0].localeCompare(b[0]);
               });
             
-            // Get top 2 voted players
+            // Get top voted players, handling ties
             if (sortedVotes.length >= 2) {
-              ejectedPlayers = [sortedVotes[0][0], sortedVotes[1][0]];
+              const topVoteCount = sortedVotes[0][1];
+              const secondVoteCount = sortedVotes[1][1];
+              
+              // Add all players with top vote count
+              ejectedPlayers = sortedVotes.filter(([_, count]) => count === topVoteCount).map(([name]) => name);
+              
+              // If we need more players to reach 2, add players with second highest count
+              if (ejectedPlayers.length < 2) {
+                const secondPlacePlayers = sortedVotes
+                  .filter(([_, count]) => count === secondVoteCount)
+                  .map(([name]) => name);
+                ejectedPlayers = [...ejectedPlayers, ...secondPlacePlayers.slice(0, 2 - ejectedPlayers.length)];
+              }
+              
+              // Limit to 2 players max
+              ejectedPlayers = ejectedPlayers.slice(0, 2);
             } else if (sortedVotes.length === 1) {
               ejectedPlayers = [sortedVotes[0][0]];
             }
@@ -1562,7 +1665,7 @@ wss.on('connection', (ws, req) => {
         
         // Record this impostor's guess
         lobby.impostorGuesses[player.id] = {
-          guess: String(msg.guess || '').trim().toLowerCase(),
+          guess: sanitizeInput(msg.guess || '', 50).toLowerCase(),
           name: player.name
         };
         
@@ -1661,12 +1764,38 @@ wss.on('connection', (ws, req) => {
         
         console.log(`Restart check for lobby ${lobbyId}: ${playersInGame.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players, ${spectatorsWantingToJoin.length} spectators wanting to join`);
         
-        // FIXED RESTART LOGIC: Game restarts when we have at least 3 ready participants
-        // (players from previous game who pressed restart + spectators who want to join)
-        const totalReady = readyConnectedPlayers.length + spectatorsWantingToJoin.length;
+        // FIXED RESTART LOGIC: 
+        // 1. All previous game players must be ready OR disconnected and removed
+        // 2. Then we need at least 3 total participants (ready players + spectators wanting to join)
         
-        if (totalReady >= 3) {
-          console.log(`Restart condition met for lobby ${lobbyId}: ${totalReady} participants ready (${readyConnectedPlayers.length} players + ${spectatorsWantingToJoin.length} spectators)`);
+        // First, check if all previous game players are accounted for
+        const disconnectedPlayersRemaining = playersInGame.filter(p => 
+          !p.ws?.readyState === 1 && p.lastDisconnectTime && 
+          (Date.now() - p.lastDisconnectTime <= RESULTS_GRACE_PERIOD)
+        );
+        
+        // If there are still disconnected players within grace period, wait
+        if (disconnectedPlayersRemaining.length > 0) {
+          console.log(`Waiting for ${disconnectedPlayersRemaining.length} disconnected players to reconnect`);
+          return;
+        }
+        
+        // Now check if all connected players from previous game are ready
+        const connectedPlayersFromPreviousGame = playersInGame.filter(p => p.ws?.readyState === 1);
+        const allConnectedPlayersReady = connectedPlayersFromPreviousGame.every(p => 
+          lobby.restartReady.includes(p.id)
+        );
+        
+        if (!allConnectedPlayersReady) {
+          console.log(`Not all connected players from previous game are ready`);
+          return;
+        }
+        
+        // Now check if we have enough participants (at least 3)
+        const totalParticipants = readyConnectedPlayers.length + spectatorsWantingToJoin.length;
+        
+        if (totalParticipants >= 3) {
+          console.log(`Restart condition met for lobby ${lobbyId}: All previous players ready + ${totalParticipants} total participants`);
           
           // Convert spectators who want to join into players
           const spectatorsToJoin = lobby.spectators.filter(s => 
@@ -1709,7 +1838,7 @@ wss.on('connection', (ws, req) => {
           lobby.restartReady = []; // Clear restart ready for new game
           startGame(lobby);
         } else {
-          console.log(`Restart condition NOT met: ${totalReady}/3 ready participants`);
+          console.log(`Not enough participants to restart: ${totalParticipants}/3`);
         }
       }
 
@@ -1729,11 +1858,17 @@ wss.on('connection', (ws, req) => {
   ws.on('close', (code, reason) => {
     clearTimeout(connectionTimeout);
     
+    // Clean up WebSocket object properties to prevent memory leaks
+    delete ws.inLobby;
+    delete ws.isAlive;
+    delete ws.connectionEpoch;
+    
     if (lobbyId && lobbies[lobbyId] && player) {
       const lobby = lobbies[lobbyId];
       
-      if (ws.connectionEpoch !== player.connectionEpoch) {
-        console.log(`Ignoring close from stale socket for player ${player.name}`);
+      // FIX: Proper connection epoch check
+      if (player.connectionEpoch && ws.connectionEpoch !== player.connectionEpoch) {
+        console.log(`Ignoring close from stale socket for player ${player.name} (epoch mismatch)`);
         return;
       }
       
@@ -1766,13 +1901,13 @@ wss.on('connection', (ws, req) => {
       broadcastLobbyList();
     }
     
-    broadcastLobbyList();
-    
     console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
   });
 
   ws.on('error', (error) => {
     console.error(`WebSocket error for ${connectionId}:`, error.message);
+    // Clean up on error
+    clearTimeout(connectionTimeout);
   });
 
   function handlePlayerJoin(ws, msg, targetLobbyId, connectionId) {
@@ -1804,10 +1939,7 @@ wss.on('connection', (ws, req) => {
     } else {
       // New player joining
       const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
-      let uniqueName = String(msg.name)
-        .replace(/[<>]/g, '')
-        .substring(0, 20)
-        .trim();
+      let uniqueName = sanitizeInput(msg.name || 'Player', 20);
       
       if (isNameTakenInLobby(lobby, uniqueName)) {
         uniqueName = makeNameUnique(uniqueName, allNames, msg.playerId);
@@ -1975,7 +2107,7 @@ wss.on('connection', (ws, req) => {
     } else {
       // New spectator
       const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
-      const baseName = msg.name || `Spectator-${Math.floor(Math.random() * 1000)}`;
+      const baseName = sanitizeInput(msg.name || `Spectator-${Math.floor(Math.random() * 1000)}`, 20);
       let uniqueName = baseName.trim();
       
       if (isNameTakenInLobby(lobby, uniqueName)) {
@@ -2210,20 +2342,21 @@ wss.on('connection', (ws, req) => {
       connectedPlayers.some(p => p.id === id)
     );
     
-    // Calculate total ready participants (players + spectators)
+    // Calculate total ready participants (players only - spectators don't count for restart)
     const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
     const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
       connectedSpectators.some(s => s.id === id)
     );
     
-    const totalReadyParticipants = readyConnectedPlayers.length + spectatorsWantingToJoin.length;
+    // FIX: Spectators don't count towards restart condition, only for total participants
+    const totalReadyParticipants = readyConnectedPlayers.length; // Only players
     
     lobby.players.forEach(p => {
       if (p.ws?.readyState === 1) {
         try {
           p.ws.send(JSON.stringify({
             type: 'restartUpdate',
-            readyCount: totalReadyParticipants, // Send total ready participants
+            readyCount: totalReadyParticipants, // Send only player ready count
             totalPlayers: playersInGame.length,
             spectatorsWantingToJoin: spectatorsWantingToJoin.length,
             isSpectator: false,
@@ -2240,7 +2373,7 @@ wss.on('connection', (ws, req) => {
         try {
           s.ws.send(JSON.stringify({
             type: 'restartUpdate',
-            readyCount: totalReadyParticipants, // Send total ready participants
+            readyCount: totalReadyParticipants, // Send only player ready count
             totalPlayers: playersInGame.length,
             spectatorsWantingToJoin: spectatorsWantingToJoin.length,
             isSpectator: true,
