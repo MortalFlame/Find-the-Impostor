@@ -151,19 +151,24 @@ function removePlayerFromAllLobbies(playerId, reason = 'Joined another lobby') {
         sendRestartUpdates(lobby);
       }
       
-      // Immediately delete empty lobbies
+      // Delete empty lobbies immediately ONLY during waiting phase (lobby phase)
       if (lobby.players.length === 0 && lobby.spectators.length === 0) {
-        console.log(`Deleting empty lobby: ${lobbyId}`);
-        
-        if (lobby.turnTimeout?.timer) {
-          clearTimeout(lobby.turnTimeout.timer);
+        if (lobby.phase === 'lobby') {
+          console.log(`Deleting empty lobby in waiting phase: ${lobbyId}`);
+          
+          if (lobby.turnTimeout?.timer) {
+            clearTimeout(lobby.turnTimeout.timer);
+          }
+          
+          if (lobby.impostorGuessTimeout?.timer) {
+            clearTimeout(lobby.impostorGuessTimeout.timer);
+          }
+          
+          delete lobbies[lobbyId];
+        } else {
+          // Game is in progress - don't delete immediately, let cleanup handle it
+          console.log(`Lobby ${lobbyId} is empty but game is in progress (phase: ${lobby.phase}). Keeping for grace period.`);
         }
-        
-        if (lobby.impostorGuessTimeout?.timer) {
-          clearTimeout(lobby.impostorGuessTimeout.timer);
-        }
-        
-        delete lobbies[lobbyId];
       } else {
         // Broadcast updated lobby state
         broadcast(lobby, { 
@@ -412,17 +417,13 @@ function startGame(lobby) {
   lobby.ejectedPlayers = null;
   lobby.impostorGuesses = null;
 
-  // FIX: Reset wantsToJoinNextGame for all spectators when a new game starts
-  // But only for spectators who aren't already players
+  // Reset wantsToJoinNextGame for all spectators when a new game starts
   lobby.spectators.forEach(s => {
     s.vote = '';
-    // Only reset if they're still a spectator (not converted to player)
-    if (lobby.spectators.includes(s)) {
-      s.wantsToJoinNextGame = false;
-    }
+    s.wantsToJoinNextGame = false;
   });
   
-  // FIX: Clear spectatorsWantingToJoin after processing
+  // Clear spectatorsWantingToJoin after processing
   lobby.spectatorsWantingToJoin = [];
 
   const { word, hint } = getRandomWord(lobby);
@@ -731,18 +732,46 @@ function cleanupLobby(lobby, lobbyId) {
     return true;
   });
   
-  // IMMEDIATELY DELETE EMPTY LOBBIES
+  // DELETE EMPTY LOBBIES with grace period logic
   if (lobby.players.length === 0 && lobby.spectators.length === 0) {
-    console.log(`Deleting empty lobby: ${lobbyId}`);
-    if (lobby.turnTimeout?.timer) {
-      clearTimeout(lobby.turnTimeout.timer);
+    if (lobby.phase === 'lobby') {
+      // Immediate deletion for empty lobbies in waiting phase
+      console.log(`Deleting empty lobby in waiting phase: ${lobbyId}`);
+      if (lobby.turnTimeout?.timer) {
+        clearTimeout(lobby.turnTimeout.timer);
+      }
+      if (lobby.impostorGuessTimeout?.timer) {
+        clearTimeout(lobby.impostorGuessTimeout.timer);
+      }
+      delete lobbies[lobbyId];
+      broadcastLobbyList();
+      return;
+    } else {
+      // Game is in progress - keep the lobby for potential reconnection
+      console.log(`Lobby ${lobbyId} is empty but game is in progress (phase: ${lobby.phase}). Keeping lobby.`);
+      
+      // Check if we should start a grace period
+      if (!lobby.emptyLobbyGracePeriodStart) {
+        lobby.emptyLobbyGracePeriodStart = now;
+        console.log(`Starting 60s grace period for empty lobby ${lobbyId}`);
+      } else if (now - lobby.emptyLobbyGracePeriodStart > 60000) {
+        // Grace period expired - delete the lobby
+        console.log(`Grace period expired for empty lobby ${lobbyId}, deleting`);
+        if (lobby.turnTimeout?.timer) {
+          clearTimeout(lobby.turnTimeout.timer);
+        }
+        if (lobby.impostorGuessTimeout?.timer) {
+          clearTimeout(lobby.impostorGuessTimeout.timer);
+        }
+        delete lobbies[lobbyId];
+        broadcastLobbyList();
+        return;
+      }
+      // Continue with cleanup but don't delete yet
     }
-    if (lobby.impostorGuessTimeout?.timer) {
-      clearTimeout(lobby.impostorGuessTimeout.timer);
-    }
-    delete lobbies[lobbyId];
-    broadcastLobbyList();
-    return;
+  } else {
+    // Lobby is not empty, reset grace period
+    lobby.emptyLobbyGracePeriodStart = null;
   }
   
   if (lobby.phase !== 'lobby' && lobby.phase !== 'results' && lobby.phase !== 'impostorGuess') {
@@ -917,6 +946,7 @@ wss.on('connection', (ws, req) => {
             restartReady: [],
             spectatorsWantingToJoin: [],
             lastTimeBelowThreePlayers: null,
+            emptyLobbyGracePeriodStart: null,
             availableWords: null,
             usedWords: [],
             impostorGuessOption: false,
@@ -933,16 +963,29 @@ wss.on('connection', (ws, req) => {
 
         // Check if player already exists in this lobby
         const existingPlayerInThisLobby = lobby.players.find(p => p.id === msg.playerId);
+        const existingSpectatorInThisLobby = lobby.spectators.find(s => s.id === msg.playerId);
         
-        // Allow joining during results phase OR if player is reconnecting to their current lobby
-        if ((lobby.phase !== 'lobby' && lobby.phase !== 'results') && !existingPlayerInThisLobby) {
-          console.log(`Player ${msg.playerId} joining game in progress as spectator`);
-          
-          // If player doesn't exist in this lobby and game is active, they become spectator
+        // If player exists as a spectator, reconnect them as spectator
+        if (existingSpectatorInThisLobby) {
+          console.log(`Player ${msg.playerId} reconnecting as spectator to lobby ${lobbyId}`);
           return handleSpectatorJoin(ws, msg, lobbyId, connectionId);
-        } else {
-          // Player exists in this lobby OR it's lobby/results phase
+        }
+        
+        // If player exists as a player, reconnect them as player
+        if (existingPlayerInThisLobby) {
+          console.log(`Player ${msg.playerId} reconnecting as player to lobby ${lobbyId}`);
           return handlePlayerJoin(ws, msg, lobbyId, connectionId);
+        }
+        
+        // New player joining
+        // Allow joining during lobby or results phase
+        if (lobby.phase === 'lobby' || lobby.phase === 'results') {
+          console.log(`New player ${msg.playerId} joining lobby ${lobbyId} (phase: ${lobby.phase})`);
+          return handlePlayerJoin(ws, msg, lobbyId, connectionId);
+        } else {
+          // Game is active - join as spectator
+          console.log(`New player ${msg.playerId} joining active game in lobby ${lobbyId} as spectator (phase: ${lobby.phase})`);
+          return handleSpectatorJoin(ws, msg, lobbyId, connectionId);
         }
       }
 
@@ -1021,16 +1064,20 @@ wss.on('connection', (ws, req) => {
             sendRestartUpdates(lobby);
           }
           
-          // Check if lobby is now empty and delete it
+          // Check if lobby is now empty and delete it (only if in lobby phase)
           if (lobby.players.length === 0 && lobby.spectators.length === 0) {
-            console.log(`Deleting empty lobby: ${lobbyId}`);
-            if (lobby.turnTimeout?.timer) {
-              clearTimeout(lobby.turnTimeout.timer);
+            if (lobby.phase === 'lobby') {
+              console.log(`Deleting empty lobby: ${lobbyId}`);
+              if (lobby.turnTimeout?.timer) {
+                clearTimeout(lobby.turnTimeout.timer);
+              }
+              if (lobby.impostorGuessTimeout?.timer) {
+                clearTimeout(lobby.impostorGuessTimeout.timer);
+              }
+              delete lobbies[lobbyId];
+            } else {
+              console.log(`Lobby ${lobbyId} is empty but game is in progress (phase: ${lobby.phase}). Keeping for grace period.`);
             }
-            if (lobby.impostorGuessTimeout?.timer) {
-              clearTimeout(lobby.impostorGuessTimeout.timer);
-            }
-            delete lobbies[lobbyId];
           } else if (!shouldEndGameImmediately && wasGameInProgress) {
             // Only check game end conditions if we didn't already end the game
             checkGameEndConditions(lobby, lobbyId);
@@ -1077,14 +1124,21 @@ wss.on('connection', (ws, req) => {
       
       if (isSpectator) {
         if (msg.type === 'restart') {
-          if (!player.wantsToJoinNextGame) {
-            player.wantsToJoinNextGame = true;
+          // Toggle wantsToJoinNextGame
+          player.wantsToJoinNextGame = !player.wantsToJoinNextGame;
+          
+          if (player.wantsToJoinNextGame) {
             if (!lobby.spectatorsWantingToJoin.includes(player.id)) {
               lobby.spectatorsWantingToJoin.push(player.id);
             }
-            
-            sendRestartUpdates(lobby);
+          } else {
+            const index = lobby.spectatorsWantingToJoin.indexOf(player.id);
+            if (index !== -1) {
+              lobby.spectatorsWantingToJoin.splice(index, 1);
+            }
           }
+          
+          sendRestartUpdates(lobby);
         }
         return;
       }
@@ -1391,6 +1445,35 @@ wss.on('connection', (ws, req) => {
             }
             
             broadcastLobbyList();
+          } else {
+            // No one ejected (tie)
+            console.log(`Voting resulted in a tie in lobby ${lobbyId}`);
+            // In case of tie, end the game
+            const impostors = lobby.players.filter(p => p.role === 'impostor');
+            const winner = lobby.twoImpostorsOption ? 'Impostors' : 'Impostor';
+            
+            broadcast(lobby, {
+              type: 'gameEnd',
+              roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+              votes: Object.fromEntries(connectedPlayers.map(p => [p.name, p.vote])),
+              secretWord: lobby.word,
+              hint: lobby.hint,
+              winner,
+              twoImpostorsMode: lobby.twoImpostorsOption || false
+            });
+            
+            lobby.phase = 'results';
+            lobby.lastTimeBelowThreePlayers = null;
+            lobby.turnEndsAt = null;
+            lobby.ejectedPlayers = null;
+            lobby.impostorGuesses = null;
+            
+            if (lobby.turnTimeout?.timer) {
+              clearTimeout(lobby.turnTimeout.timer);
+              lobby.turnTimeout = null;
+            }
+            
+            broadcastLobbyList();
           }
         }
       }
@@ -1468,13 +1551,19 @@ wss.on('connection', (ws, req) => {
       if (msg.type === 'restart') {
         if (!isSpectator && player.role && !lobby.restartReady.includes(player.id)) {
           lobby.restartReady.push(player.id);
+        } else if (!isSpectator && player.role && lobby.restartReady.includes(player.id)) {
+          // Toggle restart ready
+          const index = lobby.restartReady.indexOf(player.id);
+          if (index !== -1) {
+            lobby.restartReady.splice(index, 1);
+          }
         }
         
         sendRestartUpdates(lobby);
         
         const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
         
-        // FIX: Only count players who were in the previous game AND are still connected
+        // Only count players who were in the previous game AND are still connected
         const playersInGame = connectedPlayers.filter(p => p.role);
         
         // Don't wait for disconnected players - only count connected players
@@ -1484,7 +1573,7 @@ wss.on('connection', (ws, req) => {
         
         console.log(`Restart check for lobby ${lobbyId}: ${playersInGame.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players`);
         
-        // FIX: Game should only restart when ALL players from the previous round press restart
+        // Game should only restart when ALL players from the previous round press restart
         // AND there are at least 3 players with roles (from previous game)
         if (playersInGame.length >= 3 && readyConnectedPlayers.length === playersInGame.length) {
           console.log(`Restart condition met for lobby ${lobbyId}: All ${playersInGame.length} players from previous game are ready`);
@@ -1502,6 +1591,7 @@ wss.on('connection', (ws, req) => {
               spectator.isSpectator = false;
               spectator.wantsToJoinNextGame = false;
               spectator.role = null;
+              spectator.vote = [];
               lobby.players.push(spectator);
               
               try {
@@ -1599,7 +1689,7 @@ wss.on('connection', (ws, req) => {
       player.connectionEpoch = (player.connectionEpoch || 0) + 1;
       ws.connectionEpoch = player.connectionEpoch;
       
-      // IMPORTANT: If game is in progress, they should resume as a player, not spectator
+      // If game is in progress, they should resume as a player
       if (lobby.phase !== 'lobby' && lobby.phase !== 'results') {
         console.log(`Player ${player.name} reconnected to active game in lobby ${targetLobbyId}, phase: ${lobby.phase}`);
       }
@@ -1744,8 +1834,7 @@ wss.on('connection', (ws, req) => {
         player.connectionEpoch = (player.connectionEpoch || 0) + 1;
         ws.connectionEpoch = player.connectionEpoch;
         
-        // FIX: Always restore wantsToJoinNextGame from the spectator object
-        // The spectator object should have the correct state stored
+        // Restore wantsToJoinNextGame from the spectator object
         if (player.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(player.id)) {
           lobby.spectatorsWantingToJoin.push(player.id);
         }
@@ -1783,7 +1872,7 @@ wss.on('connection', (ws, req) => {
 
     ws.inLobby = true;
 
-    // FIX: Send restart state update to the reconnected spectator
+    // Send restart state update to the reconnected spectator
     if (player.wantsToJoinNextGame) {
       setTimeout(() => {
         if (player.ws?.readyState === 1) {
