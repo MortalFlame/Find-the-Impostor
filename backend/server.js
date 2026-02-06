@@ -918,6 +918,65 @@ lobby.spectators.forEach(s => {
   };
 }
 
+  function sendRestartUpdates(lobby) {
+    // IMPORTANT: Only send restart updates during results or lobby phase
+    if (lobby.phase !== 'results' && lobby.phase !== 'lobby') {
+      console.log(`Not sending restart updates during phase: ${lobby.phase}`);
+      return;
+    }
+    
+    const playersInGame = getPlayersInGame(lobby);
+    
+    // Filter restartReady to only include connected players
+    const readyConnectedPlayers = lobby.restartReady.filter(id => 
+      lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
+    );
+    
+    // Calculate total ready participants (players only - spectators don't count for restart)
+    const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
+    const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
+      connectedSpectators.some(s => s.id === id)
+    );
+    
+    // FIX: Spectators don't count towards restart condition, only for total participants
+    const totalReadyParticipants = readyConnectedPlayers.length; // Only players
+    
+    lobby.players.forEach(p => {
+      if (p.ws?.readyState === 1) {
+        try {
+          p.ws.send(JSON.stringify({
+            type: 'restartUpdate',
+            readyCount: totalReadyParticipants, // Send only player ready count
+            totalPlayers: playersInGame.length,
+            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
+            isSpectator: false,
+            playerRole: p.role
+          }));
+        } catch (err) {
+          console.log(`Failed to send restart update to ${p.name}`);
+        }
+      }
+    });
+    
+    lobby.spectators.forEach(s => {
+      if (s.ws?.readyState === 1) {
+        try {
+          s.ws.send(JSON.stringify({
+            type: 'restartUpdate',
+            readyCount: totalReadyParticipants, // Send only player ready count
+            totalPlayers: playersInGame.length,
+            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
+            isSpectator: true,
+            wantsToJoin: s.wantsToJoinNextGame || false,
+            status: s.wantsToJoinNextGame ? 'joining' : 'waiting'
+          }));
+        } catch (err) {
+          console.log(`Failed to send restart update to spectator ${s.name}`);
+        }
+      }
+    });
+  }
+
 function cleanupLobby(lobby, lobbyId) {
   const now = Date.now();
   let hasChanges = false;
@@ -2062,10 +2121,20 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
           connectedPlayers.some(p => p.id === id && p.role)
         );
         
-        // Get spectators who want to join
-        const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
-          connectedSpectators.some(s => s.id === id)
-        );
+        // Get spectators who want to join (including disconnected within grace period)
+const now = Date.now();
+const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
+  const spectator = lobby.spectators.find(s => s.id === id);
+  if (!spectator) return false;
+  
+  // Count if connected OR within grace period
+  const isConnected = spectator.ws?.readyState === 1;
+  const withinGracePeriod = spectator.lastDisconnectTime && 
+                            (now - spectator.lastDisconnectTime <= RESULTS_GRACE_PERIOD);
+  
+  return isConnected || withinGracePeriod;
+});
+        const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
         
         console.log(`Restart check for lobby ${lobbyId}: ${playersWithRoles.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players, ${spectatorsWantingToJoin.length} spectators wanting to join`);
         
@@ -2729,66 +2798,7 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
     }
     console.log(`==================================================`);
   }
-
-  function sendRestartUpdates(lobby) {
-    // IMPORTANT: Only send restart updates during results or lobby phase
-    if (lobby.phase !== 'results' && lobby.phase !== 'lobby') {
-      console.log(`Not sending restart updates during phase: ${lobby.phase}`);
-      return;
-    }
-    
-    const playersInGame = getPlayersInGame(lobby);
-    
-    // Filter restartReady to only include connected players
-    const readyConnectedPlayers = lobby.restartReady.filter(id => 
-      lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
-    );
-    
-    // Calculate total ready participants (players only - spectators don't count for restart)
-    const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
-    const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
-      connectedSpectators.some(s => s.id === id)
-    );
-    
-    // FIX: Spectators don't count towards restart condition, only for total participants
-    const totalReadyParticipants = readyConnectedPlayers.length; // Only players
-    
-    lobby.players.forEach(p => {
-      if (p.ws?.readyState === 1) {
-        try {
-          p.ws.send(JSON.stringify({
-            type: 'restartUpdate',
-            readyCount: totalReadyParticipants, // Send only player ready count
-            totalPlayers: playersInGame.length,
-            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
-            isSpectator: false,
-            playerRole: p.role
-          }));
-        } catch (err) {
-          console.log(`Failed to send restart update to ${p.name}`);
-        }
-      }
-    });
-    
-    lobby.spectators.forEach(s => {
-      if (s.ws?.readyState === 1) {
-        try {
-          s.ws.send(JSON.stringify({
-            type: 'restartUpdate',
-            readyCount: totalReadyParticipants, // Send only player ready count
-            totalPlayers: playersInGame.length,
-            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
-            isSpectator: true,
-            wantsToJoin: s.wantsToJoinNextGame || false,
-            status: s.wantsToJoinNextGame ? 'joining' : 'waiting'
-          }));
-        } catch (err) {
-          console.log(`Failed to send restart update to spectator ${s.name}`);
-        }
-      }
-    });
-  }
-  
+ 
   setTimeout(() => {
     if (ws.readyState === 1) {
       const lobbyList = Object.entries(lobbies).map(([id, lobby]) => ({
