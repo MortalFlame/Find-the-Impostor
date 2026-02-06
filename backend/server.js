@@ -2134,9 +2134,9 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
   
   return isConnected || withinGracePeriod;
 });
-        const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
+       // const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
         
-        console.log(`Restart check for lobby ${lobbyId}: ${playersWithRoles.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players, ${spectatorsWantingToJoin.length} spectators wanting to join`);
+       // console.log(`Restart check for lobby ${lobbyId}: ${playersWithRoles.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players, ${spectatorsWantingToJoin.length} spectators wanting to join`);
         
         // FIXED RESTART LOGIC: 
         // 1. All previous game players must be ready OR disconnected and removed
