@@ -2602,7 +2602,7 @@ wss.on('connection', (ws, req) => {
           word: lobby.word,
           hint: lobby.hint,
           isSpectator: true,
-          playerName: spectator.name
+          playerName: spectator.name,
           wantsToJoinNextGame: spectator.wantsToJoinNextGame || false  // ← Add this for active game phases too
         }));
         
