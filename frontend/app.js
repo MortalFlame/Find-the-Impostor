@@ -1154,6 +1154,12 @@ function connect() {
           
           selectedVotes = [];
           hasSubmittedVotes = false;
+
+          console.log(`========== VOTING PHASE ==========`);
+  console.log(`isSpectator: ${isSpectator}`);
+  console.log(`spectatorWantsToJoin: ${spectatorWantsToJoin}`);
+  console.log(`spectatorHasClickedRestart: ${spectatorHasClickedRestart}`);
+  console.log(`==================================`);
           
           if (twoImpostorsMode) {
             turnEl.textContent = isSpectator ? 'Spectating - Vote for 2 Impostors!' : 'Vote for 2 Impostors! (Select 2 players)';
