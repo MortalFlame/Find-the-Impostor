@@ -719,30 +719,10 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
       turnEndsAt: lobby.turnEndsAt
     });
   }
-
-  // FIX: Improved logic to handle disconnected players
-  const playersInGame = getPlayersInGame(lobby);
-  const currentIndex = lobby.turn;
-
-// If the current player is no longer in the game (grace expired), force skip
-  if (currentPlayer && !playersInGame.includes(currentPlayer)) {
-    console.log(`Current player ${currentPlayer.name} is no longer in game, forcing skip`);
-    
-    // Add empty entry for disconnected player if not already added
-    if (!isTimeout && (lobby.phase === 'round1' || lobby.phase === 'round2')) {
-      const entry = { name: currentPlayer.name, word: '' };
-      if (lobby.phase === 'round1') {
-        lobby.round1.push(entry);
-      } else if (lobby.phase === 'round2') {
-        lobby.round2.push(entry);
-      }
-    }
-  }
   
   // FIX: Give turn to ALL players in game (including disconnected within grace period)
   let nextIndex = (lobby.turn + 1) % lobby.players.length;
   let attempts = 0;
-  let foundNextPlayer = false;
   
   while (attempts < lobby.players.length) {
     const nextPlayer = lobby.players[nextIndex];
@@ -765,8 +745,8 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
     attempts++;
   }
   
-  if (!foundNextPlayer) {
-    console.log('No valid player found for next turn, checking game end conditions');
+  if (attempts >= lobby.players.length) {
+    console.log('No connected players found to take turn');
     const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
     if (connectedPlayers.length === 0) {
       console.log('All players disconnected during turn, ending game early');
@@ -775,15 +755,12 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
     return;
   }
   
-  const updatedPlayersInGame = getPlayersInGame(lobby);
+  const playersInGame = getPlayersInGame(lobby);
   
   if (lobby.phase === 'round1') {
-    if (lobby.round1.length >= updatedPlayersInGame.length) {
-      console.log(`✓ Advancing to round2: ${lobby.round1.length}/${updatedPlayersInGame.length} submissions`);
+    if (lobby.round1.length >= playersInGame.length) {
       lobby.phase = 'round2';
       lobby.turn = 0;
-      
-      // Find first connected player for turn
       for (let i = 0; i < lobby.players.length; i++) {
         if (lobby.players[i]?.ws?.readyState === 1) {
           lobby.turn = i;
@@ -805,7 +782,6 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
     }
   } else if (lobby.phase === 'round2') {
     if (lobby.round2.length >= playersInGame.length) {
-      console.log(`✓ All players submitted for round2, advancing to voting`);
       lobby.phase = 'voting';
       broadcast(lobby, {
         type: 'turnUpdate',
@@ -2375,14 +2351,14 @@ wss.on('connection', (ws, req) => {
       player.wantsToJoinNextGame = wasWantingToJoin;
 
       // Sync array and flag
-   //   if (player.wantsToJoinNextGame &&
-   //       !lobby.spectatorsWantingToJoin.includes(player.id)) {
-    //    lobby.spectatorsWantingToJoin.push(player.id);
-   //   } else if (!player.wantsToJoinNextGame &&
-    //             lobby.spectatorsWantingToJoin.includes(player.id)) {
-    //    const index = lobby.spectatorsWantingToJoin.indexOf(player.id);
-     //   if (index !== -1) lobby.spectatorsWantingToJoin.splice(index, 1);
-    //  }
+      if (player.wantsToJoinNextGame &&
+          !lobby.spectatorsWantingToJoin.includes(player.id)) {
+        lobby.spectatorsWantingToJoin.push(player.id);
+      } else if (!player.wantsToJoinNextGame &&
+                 lobby.spectatorsWantingToJoin.includes(player.id)) {
+        const index = lobby.spectatorsWantingToJoin.indexOf(player.id);
+        if (index !== -1) lobby.spectatorsWantingToJoin.splice(index, 1);
+      }
       
       console.log(`SPECTATOR RECONNECT: ${player.name}`);
       console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
