@@ -354,11 +354,12 @@ function broadcast(lobby, data) {
 // Get players who are still in the game (not removed and grace not expired)
 function getPlayersInGame(lobby) {
   const now = Date.now();
-  return lobby.players.filter(p => {
+  const result = lobby.players.filter(p => {
     // Must have a role (is playing)
-     if (!p.role) {
+    if (!p.role) {
       console.log(`  ${p.name}: No role, excluded`);
       return false;
+    }
     
     // If explicitly removed, not in game
     if (p.removed) {
@@ -370,6 +371,7 @@ function getPlayersInGame(lobby) {
     if (p.ws?.readyState === 1) {
       console.log(`  ${p.name}: Connected, included`);
       return true;
+    }
     
     // If disconnected but within grace period, still in game
     if (p.lastDisconnectTime && (now - p.lastDisconnectTime <= GAME_GRACE_PERIOD)) {
@@ -382,10 +384,10 @@ function getPlayersInGame(lobby) {
     console.log(`  ${p.name}: Grace expired or no disconnect time, excluded`);
     return false;
   });
+  
   console.log(`getPlayersInGame: ${result.length}/${lobby.players.length} total players`);
   return result;
 }
-
 
 function checkGameEndConditions(lobby, lobbyId) {
   // Don't check during lobby, results, or impostor guess phases
@@ -751,13 +753,6 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
   
   // FIX: Use players who are still in the game (not removed and grace not expired)
   const playersInGame = getPlayersInGame(lobby);
-  
-  console.log(`submitWord: ${player.name} submitted "${sanitizedWord}"`);
-  console.log(`  Phase: ${lobby.phase}`);
-  console.log(`  Submissions: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length}`);
-  console.log(`  Players in game: ${playersInGame.length}`);
-  console.log(`  Checking: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length} >= ${playersInGame.length}`);
-  
   
   if (lobby.phase === 'round1') {
     if (lobby.round1.length >= playersInGame.length) {
@@ -1446,7 +1441,9 @@ wss.on('connection', (ws, req) => {
               lobby.spectatorsWantingToJoin.splice(index, 1);
             }
           }
+          
           console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
+          
           sendRestartUpdates(lobby);
         }
         return;
@@ -1548,6 +1545,12 @@ wss.on('connection', (ws, req) => {
         // FIX: Use players who are still in the game (not removed and grace not expired)
         const playersInGame = getPlayersInGame(lobby);
         
+        console.log(`submitWord: ${player.name} submitted "${sanitizedWord}"`);
+        console.log(`  Phase: ${lobby.phase}`);
+        console.log(`  Submissions: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length}`);
+        console.log(`  Players in game: ${playersInGame.length}`);
+        console.log(`  Checking: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length} >= ${playersInGame.length}`);
+        
         if (lobby.phase === 'round1' && lobby.round1.length >= playersInGame.length) {
           console.log(`✓ Advancing to round2`);
           lobby.phase = 'round2';
@@ -1571,6 +1574,7 @@ wss.on('connection', (ws, req) => {
           startTurnTimer(lobby);
           return;
         } else if (lobby.phase === 'round2' && lobby.round2.length >= playersInGame.length) {
+          console.log(`✓ All players submitted for round2, advancing to voting`);
           lobby.phase = 'voting';
           broadcast(lobby, {
             type: 'turnUpdate',
@@ -2082,9 +2086,9 @@ wss.on('connection', (ws, req) => {
       
       // Only mark as disconnected if not manually removed
       if (!player.removed) {
-      player.lastDisconnectTime = Date.now();
-      console.log(`DISCONNECT: ${player.name} disconnected at ${player.lastDisconnectTime}, phase: ${lobby.phase}`); // ← ADD THIS
-    }
+        player.lastDisconnectTime = Date.now();
+        console.log(`DISCONNECT: ${player.name} disconnected at ${player.lastDisconnectTime}, phase: ${lobby.phase}`); // ← ADD THIS
+      }
       
       const wasGameInProgress = (lobby.phase !== 'lobby' && lobby.phase !== 'results' && lobby.phase !== 'impostorGuess');
       
@@ -2318,12 +2322,10 @@ wss.on('connection', (ws, req) => {
       }
       
       console.log(`SPECTATOR RECONNECT: ${player.name}`);
-  console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
-  console.log(`  wasWantingToJoin: ${wasWantingToJoin}`);
-  console.log(`  player.wantsToJoinNextGame: ${player.wantsToJoinNextGame}`);
-  console.log(`  lobby.phase: ${lobby.phase}`);
-      
-      console.log(`Spectator ${player.name} reconnected, wantsToJoinNextGame: ${player.wantsToJoinNextGame}`);
+      console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
+      console.log(`  wasWantingToJoin: ${wasWantingToJoin}`);
+      console.log(`  player.wantsToJoinNextGame: ${player.wantsToJoinNextGame}`);
+      console.log(`  lobby.phase: ${lobby.phase}`);
     } else {
       // New spectator
       const allNames = [...lobby.players, ...lobby.spectators].map(p => p.name);
