@@ -2082,65 +2082,55 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', (code, reason) => {
-    clearTimeout(connectionTimeout);
+  clearTimeout(connectionTimeout);
+  
+  // Clean up WebSocket object properties to prevent memory leaks
+  delete ws.inLobby;
+  delete ws.isAlive;
+  delete ws.connectionEpoch;
+  
+  if (lobbyId && lobbies[lobbyId] && player) {
+    const lobby = lobbies[lobbyId];
     
-    // Clean up WebSocket object properties to prevent memory leaks
-    delete ws.inLobby;
-    delete ws.isAlive;
-    delete ws.connectionEpoch;
+    // IMPORTANT: No epoch check for disconnect tracking!
+    // We need to track ALL disconnects to properly handle grace periods
     
-    if (lobbyId && lobbies[lobbyId] && player) {
-      const lobby = lobbies[lobbyId];
-      
-      // FIX: Check epoch mismatch but still track disconnect time
-      const isStaleSocket = player.connectionEpoch && ws.connectionEpoch !== player.connectionEpoch;
-      
-      if (isStaleSocket) {
-        console.log(`Close from stale socket for player ${player.name} (epoch mismatch)`);
-        // Still set lastDisconnectTime if not already set (this handles the case where old socket closes after reconnect)
-        if (!player.lastDisconnectTime && !player.removed) {
-          player.lastDisconnectTime = Date.now();
-          console.log(`DISCONNECT TRACKING: ${player.name} disconnect time set from stale socket`);
-        }
-        return; // Don't broadcast or check game end for stale sockets
-      }
-      
-      // Only mark as disconnected if not manually removed
-      if (!player.removed) {
-        player.lastDisconnectTime = Date.now();
-        console.log(`DISCONNECT: ${player.name} disconnected at ${player.lastDisconnectTime}, phase: ${lobby.phase}`);
-      }
-      
-      const wasGameInProgress = (lobby.phase !== 'lobby' && lobby.phase !== 'results' && lobby.phase !== 'impostorGuess');
-      
-      if (wasGameInProgress) {
-        checkGameEndConditions(lobby, lobbyId);
-      }
-      
-      broadcast(lobby, { 
-        type: 'lobbyUpdate', 
-        players: lobby.players.map(p => ({ 
-          id: p.id, 
-          name: p.name, 
-          connected: p.ws?.readyState === 1,
-          role: p.role || null
-        })),
-        spectators: lobby.spectators.map(s => ({ 
-          id: s.id, 
-          name: s.name, 
-          connected: s.ws?.readyState === 1 
-        })),
-        owner: lobby.owner,
-        phase: lobby.phase,
-        impostorGuessOption: lobby.impostorGuessOption || false,
-        twoImpostorsOption: lobby.twoImpostorsOption || false
-      });
-      
-      broadcastLobbyList();
+    // Only mark as disconnected if not manually removed
+    if (!player.removed) {
+      player.lastDisconnectTime = Date.now();
+      console.log(`DISCONNECT: ${player.name} disconnected at ${player.lastDisconnectTime}, phase: ${lobby.phase}`);
     }
     
-    console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
-  });
+    const wasGameInProgress = (lobby.phase !== 'lobby' && lobby.phase !== 'results' && lobby.phase !== 'impostorGuess');
+    
+    if (wasGameInProgress) {
+      checkGameEndConditions(lobby, lobbyId);
+    }
+    
+    broadcast(lobby, { 
+      type: 'lobbyUpdate', 
+      players: lobby.players.map(p => ({ 
+        id: p.id, 
+        name: p.name, 
+        connected: p.ws?.readyState === 1,
+        role: p.role || null
+      })),
+      spectators: lobby.spectators.map(s => ({ 
+        id: s.id, 
+        name: s.name, 
+        connected: s.ws?.readyState === 1 
+      })),
+      owner: lobby.owner,
+      phase: lobby.phase,
+      impostorGuessOption: lobby.impostorGuessOption || false,
+      twoImpostorsOption: lobby.twoImpostorsOption || false
+    });
+    
+    broadcastLobbyList();
+  }
+  
+  console.log(`Connection closed: ${connectionId} (code: ${code}, reason: ${reason})`);
+});
 
   ws.on('error', (error) => {
     console.error(`WebSocket error for ${connectionId}:`, error.message);
