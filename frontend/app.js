@@ -106,7 +106,7 @@ let twoImpostorsMode = false;
 let selectedVotes = [];
 let hasSubmittedVotes = false;
 
-const DEBUG_MODE = false;
+const DEBUG_MODE = true;
 
 function safeLog(...args) {
   if (DEBUG_MODE) {
