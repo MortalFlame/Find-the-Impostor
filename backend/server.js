@@ -1441,12 +1441,11 @@ wss.on('connection', (ws, req) => {
       if (isSpectator) {
         if (msg.type === 'restart') {
           // Only allow restart in results phase
-          if (lobby.phase !== 'results' && lobby.phase !== 'lobby') return;
-          
-          // Toggle wantsToJoinNextGame
-          player.wantsToJoinNextGame = !player.wantsToJoinNextGame;
-          
-          console.log(`SPECTATOR RESTART: ${player.name} toggled to ${player.wantsToJoinNextGame}`);
+          // Allow restart in any phase for spectators
+    // Toggle wantsToJoinNextGame
+    player.wantsToJoinNextGame = !player.wantsToJoinNextGame;
+    
+    console.log(`SPECTATOR RESTART: ${player.name} toggled to ${player.wantsToJoinNextGame} (phase: ${lobby.phase})`);
           
           if (player.wantsToJoinNextGame) {
             if (!lobby.spectatorsWantingToJoin.includes(player.id)) {
@@ -1460,12 +1459,34 @@ wss.on('connection', (ws, req) => {
           }
           
           console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
-          
-          sendRestartUpdates(lobby);
-        }
-        return;
+    
+    // Always send restart updates to spectators, even during game phases
+    sendRestartUpdates(lobby);
+    
+    // Also update the specific spectator about their state
+    if (player.ws?.readyState === 1) {
+      try {
+        const playersInGame = getPlayersInGame(lobby);
+        const readyConnectedPlayers = lobby.restartReady.filter(id =>
+          lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
+        );
+        
+        player.ws.send(JSON.stringify({
+          type: 'restartUpdate',
+          readyCount: readyConnectedPlayers.length,
+          totalPlayers: playersInGame.length,
+          spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
+          isSpectator: true,
+          wantsToJoin: player.wantsToJoinNextGame || false,
+          status: player.wantsToJoinNextGame ? 'joining' : 'waiting'
+        }));
+      } catch (err) {
+        console.log(`Failed to send immediate restart update to spectator ${player.name}`);
       }
-
+    }
+  }
+  return;
+}
       player.lastActionTime = Date.now();
 
       if (msg.type === 'toggleTwoImpostors' && lobby.phase === 'lobby') {
@@ -2361,18 +2382,32 @@ wss.on('connection', (ws, req) => {
       ws.connectionEpoch = player.connectionEpoch;
       
       // Restore spectator intent from the server's source of truth
-      const wasWantingToJoin = lobby.spectatorsWantingToJoin.includes(player.id);
-      player.wantsToJoinNextGame = wasWantingToJoin;
+  const wasWantingToJoin = lobby.spectatorsWantingToJoin.includes(player.id);
+  player.wantsToJoinNextGame = wasWantingToJoin;
 
-      // Sync array and flag
-      if (player.wantsToJoinNextGame &&
-          !lobby.spectatorsWantingToJoin.includes(player.id)) {
-        lobby.spectatorsWantingToJoin.push(player.id);
-      } else if (!player.wantsToJoinNextGame &&
-                 lobby.spectatorsWantingToJoin.includes(player.id)) {
-        const index = lobby.spectatorsWantingToJoin.indexOf(player.id);
-        if (index !== -1) lobby.spectatorsWantingToJoin.splice(index, 1);
+  // IMPORTANT: Send restart update immediately on reconnection
+  setTimeout(() => {
+    if (player.ws?.readyState === 1) {
+      try {
+        const playersInGame = getPlayersInGame(lobby);
+        const readyConnectedPlayers = lobby.restartReady.filter(id =>
+          lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
+        );
+        
+        player.ws.send(JSON.stringify({
+          type: 'restartUpdate',
+          readyCount: readyConnectedPlayers.length,
+          totalPlayers: playersInGame.length,
+          spectatorsWantingToJoin: lobby.spectatorsWantingToJoin.length,
+          isSpectator: true,
+          wantsToJoin: player.wantsToJoinNextGame || false,
+          status: player.wantsToJoinNextGame ? 'joining' : 'waiting'
+        }));
+      } catch (err) {
+        console.log(`Failed to send restart update to reconnected spectator ${player.name}`);
       }
+    }
+  }, 300);
       
       console.log(`SPECTATOR RECONNECT: ${player.name}`);
       console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
