@@ -86,6 +86,65 @@ function broadcastLobbyList() {
   });
 }
 
+function sendRestartUpdates(lobby) {
+  // IMPORTANT: Only send restart updates during results or lobby phase
+  if (lobby.phase !== 'results' && lobby.phase !== 'lobby') {
+    console.log(`Not sending restart updates during phase: ${lobby.phase}`);
+    return;
+  }
+  
+  const playersInGame = getPlayersInGame(lobby);
+  
+  // Filter restartReady to only include connected players
+  const readyConnectedPlayers = lobby.restartReady.filter(id => 
+    lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
+  );
+  
+  // Calculate total ready participants (players only - spectators don't count for restart)
+  const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
+  const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
+    connectedSpectators.some(s => s.id === id)
+  );
+  
+  // FIX: Spectators don't count towards restart condition, only for total participants
+  const totalReadyParticipants = readyConnectedPlayers.length; // Only players
+  
+  lobby.players.forEach(p => {
+    if (p.ws?.readyState === 1) {
+      try {
+        p.ws.send(JSON.stringify({
+          type: 'restartUpdate',
+          readyCount: totalReadyParticipants, // Send only player ready count
+          totalPlayers: playersInGame.length,
+          spectatorsWantingToJoin: spectatorsWantingToJoin.length,
+          isSpectator: false,
+          playerRole: p.role
+        }));
+      } catch (err) {
+        console.log(`Failed to send restart update to ${p.name}`);
+      }
+    }
+  });
+  
+  lobby.spectators.forEach(s => {
+    if (s.ws?.readyState === 1) {
+      try {
+        s.ws.send(JSON.stringify({
+          type: 'restartUpdate',
+          readyCount: totalReadyParticipants, // Send only player ready count
+          totalPlayers: playersInGame.length,
+          spectatorsWantingToJoin: spectatorsWantingToJoin.length,
+          isSpectator: true,
+          wantsToJoin: s.wantsToJoinNextGame || false,
+          status: s.wantsToJoinNextGame ? 'joining' : 'waiting'
+        }));
+      } catch (err) {
+        console.log(`Failed to send restart update to spectator ${s.name}`);
+      }
+    }
+  });
+}
+
 // Helper function to remove a player from any lobby they might be in
 function removePlayerFromAllLobbies(playerId, reason = 'Joined another lobby') {
   let removedFrom = [];
@@ -735,11 +794,14 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
     });
   }
   
+  // FIX: Find next player who is actually connected (not just in grace period)
   let nextIndex = (lobby.turn + 1) % lobby.players.length;
   let attempts = 0;
   
   while (attempts < lobby.players.length) {
-    if (lobby.players[nextIndex]?.ws?.readyState === 1) {
+    const nextPlayer = lobby.players[nextIndex];
+    // Check if player is connected AND not removed
+    if (nextPlayer?.ws?.readyState === 1 && !nextPlayer.removed) {
       lobby.turn = nextIndex;
       break;
     }
@@ -766,7 +828,7 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
       lobby.phase = 'round2';
       lobby.turn = 0;
       for (let i = 0; i < lobby.players.length; i++) {
-        if (lobby.players[i]?.ws?.readyState === 1) {
+        if (lobby.players[i]?.ws?.readyState === 1 && !lobby.players[i].removed) {
           lobby.turn = i;
           break;
         }
@@ -1526,102 +1588,105 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'submitWord') {
-        const currentPlayer = lobby.players[lobby.turn];
-        if (!currentPlayer || currentPlayer.id !== player.id) {
-          console.log(`Not ${player.name}'s turn (it's ${currentPlayer?.name}'s turn)`);
-          return;
-        }
+  const currentPlayer = lobby.players[lobby.turn];
+  if (!currentPlayer || currentPlayer.id !== player.id) {
+    console.log(`Not ${player.name}'s turn (it's ${currentPlayer?.name}'s turn)`);
+    return;
+  }
 
-        if (player.ws?.readyState !== 1) {
-          console.log(`Player ${player.name} not connected`);
-          return;
-        }
+  if (player.ws?.readyState !== 1) {
+    console.log(`Player ${player.name} not connected`);
+    return;
+  }
 
-        const sanitizedWord = sanitizeInput(msg.word, 50);
+  const sanitizedWord = sanitizeInput(msg.word, 50);
 
-        if (!sanitizedWord) {
-          console.log(`Player ${player.name} submitted empty/only HTML`);
-          return;
-        }
+  if (!sanitizedWord) {
+    console.log(`Player ${player.name} submitted empty/only HTML`);
+    return;
+  }
 
-        const entry = { name: player.name, word: sanitizedWord };
-        if (lobby.phase === 'round1') {
-          lobby.round1.push(entry);
-        } else if (lobby.phase === 'round2') {
-          lobby.round2.push(entry);
-        }
+  const entry = { name: player.name, word: sanitizedWord };
+  if (lobby.phase === 'round1') {
+    lobby.round1.push(entry);
+  } else if (lobby.phase === 'round2') {
+    lobby.round2.push(entry);
+  }
 
-        if (lobby.turnTimeout?.timer) {
-          clearTimeout(lobby.turnTimeout.timer);
-          lobby.turnTimeout = null;
-        }
+  if (lobby.turnTimeout?.timer) {
+    clearTimeout(lobby.turnTimeout.timer);
+    lobby.turnTimeout = null;
+  }
 
-        // FIX: Use players who are still in the game (not removed and grace not expired)
-        const playersInGame = getPlayersInGame(lobby);
-        
-        console.log(`submitWord: ${player.name} submitted "${sanitizedWord}"`);
-        console.log(`  Phase: ${lobby.phase}`);
-        console.log(`  Submissions: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length}`);
-        console.log(`  Players in game: ${playersInGame.length}`);
-        console.log(`  Checking: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length} >= ${playersInGame.length}`);
-        
-        if (lobby.phase === 'round1' && lobby.round1.length >= playersInGame.length) {
-          console.log(`✓ Advancing to round2`);
-          lobby.phase = 'round2';
-          lobby.turn = 0;
-          for (let i = 0; i < lobby.players.length; i++) {
-            if (lobby.players[i]?.ws?.readyState === 1) {
-              lobby.turn = i;
-              break;
-            }
-          }
-          
-          broadcast(lobby, {
-            type: 'turnUpdate',
-            phase: 'round1',
-            round1: lobby.round1,
-            round2: lobby.round2,
-            currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
-            turnEndsAt: lobby.turnEndsAt
-          });
-          
-          startTurnTimer(lobby);
-          return;
-        } else if (lobby.phase === 'round2' && lobby.round2.length >= playersInGame.length) {
-          console.log(`✓ All players submitted for round2, advancing to voting`);
-          lobby.phase = 'voting';
-          broadcast(lobby, {
-            type: 'turnUpdate',
-            phase: 'round2',
-            round1: lobby.round1,
-            round2: lobby.round2,
-            currentPlayer: 'Voting Phase'
-          });
-          
-          setTimeout(() => {
-            broadcast(lobby, {
-              type: 'startVoting',
-              players: lobby.players.map(p => p.name),
-              twoImpostorsMode: lobby.twoImpostorsOption || false
-            });
-          }, 500);
-          return;
-        }
-
-        let nextIndex = (lobby.turn + 1) % lobby.players.length;
-        let attempts = 0;
-        
-        while (attempts < lobby.players.length) {
-          if (lobby.players[nextIndex]?.ws?.readyState === 1) {
-            lobby.turn = nextIndex;
-            break;
-          }
-          nextIndex = (nextIndex + 1) % lobby.players.length;
-          attempts++;
-        }
-        
-        startTurnTimer(lobby);
+  // FIX: Use players who are still in the game (not removed and grace not expired)
+  const playersInGame = getPlayersInGame(lobby);
+  
+  console.log(`submitWord: ${player.name} submitted "${sanitizedWord}"`);
+  console.log(`  Phase: ${lobby.phase}`);
+  console.log(`  Submissions: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length}`);
+  console.log(`  Players in game: ${playersInGame.length}`);
+  console.log(`  Checking: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length} >= ${playersInGame.length}`);
+  
+  if (lobby.phase === 'round1' && lobby.round1.length >= playersInGame.length) {
+    console.log(`✓ Advancing to round2`);
+    lobby.phase = 'round2';
+    lobby.turn = 0;
+    for (let i = 0; i < lobby.players.length; i++) {
+      if (lobby.players[i]?.ws?.readyState === 1 && !lobby.players[i].removed) {
+        lobby.turn = i;
+        break;
       }
+    }
+    
+    broadcast(lobby, {
+      type: 'turnUpdate',
+      phase: 'round1',
+      round1: lobby.round1,
+      round2: lobby.round2,
+      currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
+      turnEndsAt: lobby.turnEndsAt
+    });
+    
+    startTurnTimer(lobby);
+    return;
+  } else if (lobby.phase === 'round2' && lobby.round2.length >= playersInGame.length) {
+    console.log(`✓ All players submitted for round2, advancing to voting`);
+    lobby.phase = 'voting';
+    broadcast(lobby, {
+      type: 'turnUpdate',
+      phase: 'round2',
+      round1: lobby.round1,
+      round2: lobby.round2,
+      currentPlayer: 'Voting Phase'
+    });
+    
+    setTimeout(() => {
+      broadcast(lobby, {
+        type: 'startVoting',
+        players: lobby.players.map(p => p.name),
+        twoImpostorsMode: lobby.twoImpostorsOption || false
+      });
+    }, 500);
+    return;
+  }
+
+  // FIX: Find next player who is actually connected (not just in grace period)
+  let nextIndex = (lobby.turn + 1) % lobby.players.length;
+  let attempts = 0;
+  
+  while (attempts < lobby.players.length) {
+    const nextPlayer = lobby.players[nextIndex];
+    // Check if player is connected AND not removed
+    if (nextPlayer?.ws?.readyState === 1 && !nextPlayer.removed) {
+      lobby.turn = nextIndex;
+      break;
+    }
+    nextIndex = (nextIndex + 1) % lobby.players.length;
+    attempts++;
+  }
+  
+  startTurnTimer(lobby);
+}
 
       if (msg.type === 'vote') {
         // Handle both single vote and array of votes
@@ -2577,64 +2642,7 @@ wss.on('connection', (ws, req) => {
     }
   }
 
-  function sendRestartUpdates(lobby) {
-    // IMPORTANT: Only send restart updates during results or lobby phase
-    if (lobby.phase !== 'results' && lobby.phase !== 'lobby') {
-      console.log(`Not sending restart updates during phase: ${lobby.phase}`);
-      return;
-    }
-    
-    const playersInGame = getPlayersInGame(lobby);
-    
-    // Filter restartReady to only include connected players
-    const readyConnectedPlayers = lobby.restartReady.filter(id => 
-      lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
-    );
-    
-    // Calculate total ready participants (players only - spectators don't count for restart)
-    const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
-    const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id =>
-      connectedSpectators.some(s => s.id === id)
-    );
-    
-    // FIX: Spectators don't count towards restart condition, only for total participants
-    const totalReadyParticipants = readyConnectedPlayers.length; // Only players
-    
-    lobby.players.forEach(p => {
-      if (p.ws?.readyState === 1) {
-        try {
-          p.ws.send(JSON.stringify({
-            type: 'restartUpdate',
-            readyCount: totalReadyParticipants, // Send only player ready count
-            totalPlayers: playersInGame.length,
-            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
-            isSpectator: false,
-            playerRole: p.role
-          }));
-        } catch (err) {
-          console.log(`Failed to send restart update to ${p.name}`);
-        }
-      }
-    });
-    
-    lobby.spectators.forEach(s => {
-      if (s.ws?.readyState === 1) {
-        try {
-          s.ws.send(JSON.stringify({
-            type: 'restartUpdate',
-            readyCount: totalReadyParticipants, // Send only player ready count
-            totalPlayers: playersInGame.length,
-            spectatorsWantingToJoin: spectatorsWantingToJoin.length,
-            isSpectator: true,
-            wantsToJoin: s.wantsToJoinNextGame || false,
-            status: s.wantsToJoinNextGame ? 'joining' : 'waiting'
-          }));
-        } catch (err) {
-          console.log(`Failed to send restart update to spectator ${s.name}`);
-        }
-      }
-    });
-  }
+  
   
   setTimeout(() => {
     if (ws.readyState === 1) {
