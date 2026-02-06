@@ -1434,6 +1434,8 @@ wss.on('connection', (ws, req) => {
           // Toggle wantsToJoinNextGame
           player.wantsToJoinNextGame = !player.wantsToJoinNextGame;
           
+          console.log(`SPECTATOR RESTART: ${player.name} toggled to ${player.wantsToJoinNextGame}`);
+          
           if (player.wantsToJoinNextGame) {
             if (!lobby.spectatorsWantingToJoin.includes(player.id)) {
               lobby.spectatorsWantingToJoin.push(player.id);
@@ -1444,7 +1446,7 @@ wss.on('connection', (ws, req) => {
               lobby.spectatorsWantingToJoin.splice(index, 1);
             }
           }
-          
+          console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
           sendRestartUpdates(lobby);
         }
         return;
