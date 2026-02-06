@@ -2315,6 +2315,12 @@ wss.on('connection', (ws, req) => {
         if (index !== -1) lobby.spectatorsWantingToJoin.splice(index, 1);
       }
       
+      console.log(`SPECTATOR RECONNECT: ${player.name}`);
+  console.log(`  spectatorsWantingToJoin array:`, lobby.spectatorsWantingToJoin);
+  console.log(`  wasWantingToJoin: ${wasWantingToJoin}`);
+  console.log(`  player.wantsToJoinNextGame: ${player.wantsToJoinNextGame}`);
+  console.log(`  lobby.phase: ${lobby.phase}`);
+      
       console.log(`Spectator ${player.name} reconnected, wantsToJoinNextGame: ${player.wantsToJoinNextGame}`);
     } else {
       // New spectator
