@@ -512,6 +512,13 @@ function endGameEarly(lobby, reason) {
   lobby.lastTimeBelowThreePlayers = null;
   lobby.ejectedPlayers = null;
   lobby.impostorGuesses = null;
+  // Ensure spectators wanting to join are properly synced when entering results phase
+lobby.spectators.forEach(s => {
+  if (s.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(s.id)) {
+    lobby.spectatorsWantingToJoin.push(s.id);
+  }
+});
+
   
   // Send restart updates so spectators see their current join state
   sendRestartUpdates(lobby);
@@ -883,6 +890,13 @@ function startImpostorGuessTimer(lobby) {
       lobby.impostorGuessTimeout = null;
       lobby.impostorGuesses = null;
       lobby.ejectedPlayers = null;
+      // Ensure spectators wanting to join are properly synced when entering results phase
+lobby.spectators.forEach(s => {
+  if (s.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(s.id)) {
+    lobby.spectatorsWantingToJoin.push(s.id);
+  }
+});
+
       
       // Send restart updates so spectators see their current join state
       sendRestartUpdates(lobby);
