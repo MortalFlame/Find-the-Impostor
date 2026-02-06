@@ -1395,8 +1395,16 @@ wss.on('connection', (ws, req) => {
           }));
           return;
         }
-        
-        removePlayerFromAllLobbies(msg.playerId, 'Joined as spectator in another lobby');
+
+        // Check if player is already a spectator in THIS lobby
+  const targetLobby = lobbies[msg.lobbyId];
+  const isAlreadySpectatorHere = targetLobby && 
+    targetLobby.spectators.some(s => s.id === msg.playerId);
+  
+  // Only remove from other lobbies if NOT already a spectator in target lobby
+  if (!isAlreadySpectatorHere) {
+    removePlayerFromAllLobbies(msg.playerId, 'Joined as spectator in another lobby');
+    }
         
         return handleSpectatorJoin(ws, msg, msg.lobbyId, connectionId);
       }
@@ -2134,13 +2142,6 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
   
   return isConnected || withinGracePeriod;
 });
-       // const connectedSpectators = lobby.spectators.filter(s => s.ws?.readyState === 1);
-        
-       // console.log(`Restart check for lobby ${lobbyId}: ${playersWithRoles.length} players with roles, ${readyConnectedPlayers.length} ready, ${connectedPlayers.length} total connected players, ${spectatorsWantingToJoin.length} spectators wanting to join`);
-        
-        // FIXED RESTART LOGIC: 
-        // 1. All previous game players must be ready OR disconnected and removed
-        // 2. Then we need at least 3 total participants (ready players + spectators wanting to join)
         
         // First, check if all previous game players are accounted for
         const disconnectedPlayersRemaining = playersWithRoles.filter(p => 
