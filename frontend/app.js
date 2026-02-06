@@ -283,7 +283,10 @@ function stopTurnTimerAnimation() {
     timerAnimationFrame = null;
   }
   currentTurnEndsAt = null;
+  timerProgress.style.strokeDashoffset = 0;
+  timerText.textContent = '30';
   turnTimerEl.classList.add('hidden');
+  isMyTurn = false;
 }
 
 function startImpostorGuessTimerAnimation(guessEndsAt) {
@@ -331,6 +334,8 @@ function stopImpostorGuessTimerAnimation() {
     impostorGuessTimer = null;
   }
   impostorGuessEndsAt = null;
+  timerProgress.style.strokeDashoffset = 0;
+  timerText.textContent = '30';
   turnTimerEl.classList.add('hidden');
 }
 
@@ -346,11 +351,13 @@ function updatePlayerList(playersData, spectatorsData = []) {
       const statusClass = isConnected ? 'player-connected' : 'player-disconnected';
       const isMe = player.name === myPlayerName;
       const nameDisplay = isMe ? `<strong>${player.name}</strong>` : player.name;
+      const roleBadge = player.role ? `<span class="role-badge role-${player.role}">${player.role.charAt(0).toUpperCase()}</span>` : '';
       
       playersHtml += `
         <div class="player-item">
           <span class="player-status-dot ${statusClass}"></span>
           <span class="player-name" title="${player.name}">${nameDisplay}</span>
+          ${roleBadge}
         </div>
       `;
     });
@@ -953,9 +960,10 @@ function connect() {
           impostorGuessOption = d.impostorGuessOption || false;
           twoImpostorsOption = d.twoImpostorsOption || false;
           
-          if (d.wantsToJoinNextGame) {
-            spectatorWantsToJoin = true;
-            spectatorHasClickedRestart = true;
+          // FIX: Properly restore spectator join state from server
+          if (d.isSpectator && d.wantsToJoinNextGame !== undefined) {
+            spectatorWantsToJoin = d.wantsToJoinNextGame;
+            spectatorHasClickedRestart = d.wantsToJoinNextGame;
           }
           
           lobbyCodeDisplay.textContent = d.lobbyId;
@@ -1041,21 +1049,19 @@ function connect() {
           restart.style.opacity = '1';
           
           if (isSpectator || d.role === 'spectator') {
-           if (d.wantsToJoinNextGame) {
-      spectatorWantsToJoin = true;
-      spectatorHasClickedRestart = true;
-      restart.innerText = 'Joining next game...';
-      restart.disabled = true;
-      restart.style.opacity = '0.7';
-    } else {
-      restart.innerText = 'Join Next Game';
-      restart.disabled = false;
-      restart.style.opacity = '1';
-    }
-    restart.classList.remove('hidden');
-  } else {
-    restart.innerText = 'Restart Game';
-    restart.classList.add('hidden');
+            if (spectatorWantsToJoin || spectatorHasClickedRestart) {
+              restart.innerText = 'Joining next game...';
+              restart.disabled = true;
+              restart.style.opacity = '0.7';
+            } else {
+              restart.innerText = 'Join Next Game';
+              restart.disabled = false;
+              restart.style.opacity = '1';
+            }
+            restart.classList.remove('hidden');
+          } else {
+            restart.innerText = 'Restart Game';
+            restart.classList.add('hidden');
           }
           
           input.value = '';
@@ -1266,11 +1272,11 @@ function connect() {
           let reasonText = '';
           
           if (d.isSpectator && d.wantsToJoinNextGame !== undefined) {
-    spectatorWantsToJoin = d.wantsToJoinNextGame;
-    if (d.wantsToJoinNextGame) {
-      spectatorHasClickedRestart = true;
-    }
-  }
+            spectatorWantsToJoin = d.wantsToJoinNextGame;
+            if (d.wantsToJoinNextGame) {
+              spectatorHasClickedRestart = true;
+            }
+          }
           
           if (d.reason === 'not_enough_players') {
             reasonText = `<div style="color:#f39c12; text-align:center; margin-bottom:10px;">
@@ -1315,15 +1321,15 @@ function connect() {
           if (isSpectator) {
             restart.classList.remove('hidden');
             if (spectatorWantsToJoin || spectatorHasClickedRestart) {
-    restart.innerText = 'Joining next game...';
-    restart.disabled = true;
-    restart.style.opacity = '0.7';
-  } else {
-    restart.innerText = 'Join Next Game';
-    restart.disabled = false;
-    restart.style.opacity = '1';
-  }
-} else if (myRoleInfo) {
+              restart.innerText = 'Joining next game...';
+              restart.disabled = true;
+              restart.style.opacity = '0.7';
+            } else {
+              restart.innerText = 'Join Next Game';
+              restart.disabled = false;
+              restart.style.opacity = '1';
+            }
+          } else if (myRoleInfo) {
             restart.classList.remove('hidden');
             restart.innerText = 'Restart Game';
             restart.disabled = false;
@@ -1363,12 +1369,12 @@ function connect() {
           }
           
           // FIX: Preserve spectator join state from server
-  if (d.isSpectator && d.wantsToJoinNextGame !== undefined) {
-    spectatorWantsToJoin = d.wantsToJoinNextGame;
-    if (d.wantsToJoinNextGame) {
-      spectatorHasClickedRestart = true;
-    }
-  }
+          if (d.isSpectator && d.wantsToJoinNextGame !== undefined) {
+            spectatorWantsToJoin = d.wantsToJoinNextGame;
+            if (d.wantsToJoinNextGame) {
+              spectatorHasClickedRestart = true;
+            }
+          }
           
           const myRoleInfo = d.roles.find(r => r.name === myPlayerName);
           
@@ -1499,15 +1505,15 @@ function connect() {
           if (isSpectator) {
             restart.classList.remove('hidden');
             if (spectatorWantsToJoin || spectatorHasClickedRestart) {
-    restart.innerText = 'Joining next game...';
-    restart.disabled = true;
-    restart.style.opacity = '0.7';
-  } else {
-    restart.innerText = 'Join Next Game';
-    restart.disabled = false;
-    restart.style.opacity = '1';
-  }
-} else if (myRoleInfo) {
+              restart.innerText = 'Joining next game...';
+              restart.disabled = true;
+              restart.style.opacity = '0.7';
+            } else {
+              restart.innerText = 'Join Next Game';
+              restart.disabled = false;
+              restart.style.opacity = '1';
+            }
+          } else if (myRoleInfo) {
             restart.classList.remove('hidden');
             restart.innerText = 'Restart Game';
             restart.disabled = false;
@@ -1723,14 +1729,33 @@ function submitVotes() {
   
   if (twoImpostorsMode) {
     if (selectedVotes.length !== 2) {
-      alert('Please select exactly 2 players to vote for.');
+      const voteCountElement = document.getElementById('voteCountDisplay');
+      if (voteCountElement) {
+        voteCountElement.style.color = '#e74c3c';
+        voteCountElement.textContent = 'Please select exactly 2 players';
+        setTimeout(() => {
+          updateVoteCountDisplay();
+        }, 2000);
+      }
       return;
     }
-    ws.send(JSON.stringify({ type: 'vote', vote: selectedVotes }));
-  } else {
-    ws.send(JSON.stringify({ type: 'vote', vote: selectedVotes[0] }));
+    
+    // Check for duplicate votes
+    const uniqueVotes = [...new Set(selectedVotes)];
+    if (uniqueVotes.length !== 2) {
+      const voteCountElement = document.getElementById('voteCountDisplay');
+      if (voteCountElement) {
+        voteCountElement.style.color = '#e74c3c';
+        voteCountElement.textContent = 'Cannot vote for same player twice';
+        setTimeout(() => {
+          updateVoteCountDisplay();
+        }, 2000);
+      }
+      return;
+    }
   }
   
+  ws.send(JSON.stringify({ type: 'vote', vote: twoImpostorsMode ? selectedVotes : selectedVotes[0] }));
   hasSubmittedVotes = true;
   
   const buttons = document.querySelectorAll('.vote-btn');
@@ -1897,22 +1922,33 @@ restart.onclick = () => {
     return;
   }
   
+  // Prevent double clicks
+  if (restart.disabled) return;
+  
   if (isSpectator) {
     if (!spectatorHasClickedRestart) {
       spectatorHasClickedRestart = true;
       spectatorWantsToJoin = true;
-      ws.send(JSON.stringify({ type: 'restart' }));
+      
+      // Visual feedback
       restart.innerText = 'Joining next game...';
       restart.disabled = true;
       restart.style.opacity = '0.7';
+      
+      // Send restart request
+      ws.send(JSON.stringify({ type: 'restart' }));
     }
   } else {
     if (!hasClickedRestart) {
       hasClickedRestart = true;
-      ws.send(JSON.stringify({ type: 'restart' }));
+      
+      // Visual feedback
       restart.innerText = 'Waiting for others...';
       restart.disabled = true;
       restart.style.opacity = '0.7';
+      
+      // Send restart request
+      ws.send(JSON.stringify({ type: 'restart' }));
     }
   }
 };
@@ -1994,6 +2030,25 @@ style.textContent = `
   .guess-incorrect {
     background-color: rgba(231, 76, 60, 0.2);
     border-left: 3px solid #e74c3c;
+  }
+  .role-badge {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: bold;
+    text-align: center;
+    line-height: 18px;
+    margin-left: 5px;
+  }
+  .role-badge.role-civilian {
+    background-color: #2ecc71;
+    color: white;
+  }
+  .role-badge.role-impostor {
+    background-color: #e74c3c;
+    color: white;
   }
 `;
 document.head.appendChild(style);
