@@ -356,22 +356,35 @@ function getPlayersInGame(lobby) {
   const now = Date.now();
   return lobby.players.filter(p => {
     // Must have a role (is playing)
-    if (!p.role) return false;
+     if (!p.role) {
+      console.log(`  ${p.name}: No role, excluded`);
+      return false;
     
     // If explicitly removed, not in game
-    if (p.removed) return false;
+    if (p.removed) {
+      console.log(`  ${p.name}: Removed, excluded`);
+      return false;
+    }
     
     // If connected, definitely in game
-    if (p.ws?.readyState === 1) return true;
+    if (p.ws?.readyState === 1) {
+      console.log(`  ${p.name}: Connected, included`);
+      return true;
     
     // If disconnected but within grace period, still in game
     if (p.lastDisconnectTime && (now - p.lastDisconnectTime <= GAME_GRACE_PERIOD)) {
+      const timeDisconnected = Math.ceil((now - p.lastDisconnectTime) / 1000);
+      console.log(`  ${p.name}: Disconnected for ${timeDisconnected}s (grace ${GAME_GRACE_PERIOD/1000}s), included`);
       return true;
     }
     
     // Grace expired or no disconnect time recorded
+    console.log(`  ${p.name}: Grace expired or no disconnect time, excluded`);
     return false;
   });
+  console.log(`getPlayersInGame: ${result.length}/${lobby.players.length} total players`);
+  return result;
+}
 }
 
 function checkGameEndConditions(lobby, lobbyId) {
@@ -738,6 +751,13 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
   
   // FIX: Use players who are still in the game (not removed and grace not expired)
   const playersInGame = getPlayersInGame(lobby);
+  
+  console.log(`submitWord: ${player.name} submitted "${sanitizedWord}"`);
+  console.log(`  Phase: ${lobby.phase}`);
+  console.log(`  Submissions: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length}`);
+  console.log(`  Players in game: ${playersInGame.length}`);
+  console.log(`  Checking: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length} >= ${playersInGame.length}`);
+  
   
   if (lobby.phase === 'round1') {
     if (lobby.round1.length >= playersInGame.length) {
@@ -1527,6 +1547,7 @@ wss.on('connection', (ws, req) => {
         const playersInGame = getPlayersInGame(lobby);
         
         if (lobby.phase === 'round1' && lobby.round1.length >= playersInGame.length) {
+          console.log(`✓ Advancing to round2`);
           lobby.phase = 'round2';
           lobby.turn = 0;
           for (let i = 0; i < lobby.players.length; i++) {
