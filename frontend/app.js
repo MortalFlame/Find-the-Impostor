@@ -984,8 +984,7 @@ function connect() {
             lobbyListContainer.style.display = 'none';
           }
           
-          updateImpostorGuessToggle();
-          updateTwoImpostorsToggle();
+          updateGameOptions();
           
           stopLobbyListAutoRefresh();
         }
@@ -1005,8 +1004,7 @@ function connect() {
           
           exitLobbyBtn.style.display = 'block';
           
-          updateImpostorGuessToggle();
-          updateTwoImpostorsToggle();
+          updateGameOptions();
           
           if (d.phase && d.phase !== 'lobby') {
             players.innerHTML += `<br><i style="color:#f39c12">Game in progress: ${d.phase}</i>`;
