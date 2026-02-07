@@ -991,7 +991,16 @@ function connect() {
 
         if (d.type === 'lobbyUpdate') {
           updatePlayerList(d.players, d.spectators);
-          
+          // Update impostor count in game mode indicator if game is active
+          if (!gameCard.classList.contains('hidden')) {
+            const impostorCountText = document.getElementById('impostorCountText');
+            if (impostorCountText && d.players) {
+              const activeImpostors = d.players.filter(p => p.role === 'impostor' && p.connected).length;
+              if (activeImpostors > 0) {
+                impostorCountText.textContent = activeImpostors === 1 ? '1 Impostor' : `${activeImpostors} Impostors`;
+              }
+            }
+          }
           const isOwnerCheck = d.owner === playerId;
           isOwner = isOwnerCheck;
           impostorGuessOption = d.impostorGuessOption || false;
