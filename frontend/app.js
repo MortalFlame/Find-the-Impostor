@@ -1970,13 +1970,102 @@ function updateGameOptions() {
 // Replace all calls to them with updateGameOptions()
 
 
-function showImpostorGuessInfo() {
-  alert('When enabled, if impostors are voted out, they get a 30-second last chance to guess the secret word. If any impostor guesses correctly, they win! Otherwise, civilians win!\n\n• Single impostor mode: Only the ejected impostor guesses\n• Two impostors mode: All ejected impostors get to guess');
+// --- TOOLTIP LOGIC ---
+
+const tooltipData = {
+  twoImpostors: `
+    <strong>2 Impostors Mode</strong><br><br>
+    The game will have 2 impostors. In voting phase, select 2 players you suspect.<br><br>
+    • Both impostors voted out = Civilians win<br>
+    • No impostors voted out = Impostors win<br>
+    • One voted out = Draw<br><br>
+    <em>Requires 4+ players.</em>
+  `,
+  impostorGuess: `
+    <strong>Impostor Guess Word</strong><br><br>
+    If an impostor is voted out, they get a 30-second "Last Chance".<br><br>
+    If they correctly guess the secret word within the time limit, the Impostors steal the win!
+  `
+};
+
+const tooltipEl = document.getElementById('infoTooltip');
+let activeTooltipTarget = null;
+
+function handleInfoClick(e) {
+  // CRITICAL: Prevent the label click from toggling the checkbox
+  e.preventDefault();
+  e.stopPropagation();
+
+  const target = e.currentTarget;
+  const infoType = target.getAttribute('data-info');
+  
+  // If clicking the same icon, toggle it off
+  if (activeTooltipTarget === target) {
+    hideTooltip();
+    return;
+  }
+
+  // Set content
+  if (tooltipData[infoType]) {
+    tooltipEl.innerHTML = tooltipData[infoType];
+    activeTooltipTarget = target;
+    
+    // Make visible to calculate size
+    tooltipEl.classList.add('visible');
+    
+    // Calculate Position
+    const iconRect = target.getBoundingClientRect();
+    const tooltipRect = tooltipEl.getBoundingClientRect();
+    
+    // Center horizontally relative to icon
+    let left = iconRect.left + (iconRect.width / 2) - (tooltipRect.width / 2);
+    
+    // Position below the icon
+    let top = iconRect.bottom + 10 + window.scrollY;
+
+    // Prevent going off screen (Mobile adjustment)
+    if (left < 10) left = 10;
+    if (left + tooltipRect.width > window.innerWidth - 10) {
+      left = window.innerWidth - tooltipRect.width - 10;
+    }
+
+    tooltipEl.style.left = `${left}px`;
+    tooltipEl.style.top = `${top}px`;
+  }
 }
 
-function showTwoImpostorsInfo() {
-  alert('When enabled, the game will have 2 impostors instead of 1. In voting phase, select 2 players you think are impostors. The top 2 voted players will be ejected. Game winning logic:\n\n• Both impostors voted out → Civilians win\n• No impostors voted out → Impostors win\n• One impostor voted out → Draw\n\nNote: Requires at least 4 players for balanced gameplay.');
+function hideTooltip() {
+  tooltipEl.classList.remove('visible');
+  activeTooltipTarget = null;
 }
+
+// Attach listeners specifically to the icons
+document.addEventListener('DOMContentLoaded', () => {
+  const infoIcons = document.querySelectorAll('.prevent-toggle');
+  
+  infoIcons.forEach(icon => {
+    icon.addEventListener('click', handleInfoClick);
+    // Also handle touch start to prevent ghost clicks on mobile
+    icon.addEventListener('touchstart', (e) => {
+      // We let the click event handle the logic, but we might need 
+      // to stop propagation here depending on device
+      e.stopPropagation(); 
+    }, { passive: true });
+  });
+
+  // Close tooltip if clicking anywhere else
+  document.addEventListener('click', (e) => {
+    if (activeTooltipTarget && !e.target.classList.contains('prevent-toggle')) {
+      hideTooltip();
+    }
+  });
+  
+  // Close on scroll
+  window.addEventListener('scroll', () => {
+    if (activeTooltipTarget) hideTooltip();
+  });
+});
+
 
 join.onclick = () => joinAsPlayer(false);
 spectate.onclick = joinAsSpectator;
