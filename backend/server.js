@@ -812,13 +812,18 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
       });
       
       setTimeout(() => {
-        broadcast(lobby, {
-          type: 'startVoting',
-          players: lobby.players.map(p => p.name),
-          twoImpostorsMode: lobby.twoImpostorsOption || false
-        });
-      }, 500);
-      return;
+            // Calculate how many impostors are currently active in the game
+            const playersInGame = getPlayersInGame(lobby);
+            const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
+            const activeImpostorCount = activeImpostors.length;
+            
+            broadcast(lobby, {
+              type: 'startVoting',
+              players: lobby.players.map(p => p.name),
+              twoImpostorsMode: lobby.twoImpostorsOption || false,
+              activeImpostorCount: activeImpostorCount // NEW: Dynamic impostor count
+            });
+          }, 500);
     }
   }
   
@@ -1786,35 +1791,43 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
       }
 
       if (msg.type === 'vote') {
-        // Handle both single vote and array of votes
-        if (lobby.twoImpostorsOption) {
-          // Expecting an array of votes in 2-impostor mode
+        // Calculate how many impostors are currently active
+        const playersInGame = getPlayersInGame(lobby);
+        const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
+        const activeImpostorCount = activeImpostors.length;
+        const expectedVoteCount = activeImpostorCount;
+        
+        console.log(`Vote received: activeImpostors=${activeImpostorCount}, expectedVotes=${expectedVoteCount}`);
+        
+        // Handle both single vote and array of votes based on ACTIVE impostor count
+        if (expectedVoteCount >= 2) {
+          // Expecting an array of votes when 2+ impostors active
           if (!Array.isArray(msg.vote)) {
-            console.log(`Invalid vote format in 2-impostor mode: ${msg.vote}`);
+            console.log(`Invalid vote format for ${expectedVoteCount}-impostor mode: ${msg.vote}`);
             return;
           }
           
-          // Validate votes - must be 2 different players
+          // Validate votes - must match expected count
           const validVotes = msg.vote.filter(v => 
             v && v !== player.name && lobby.players.some(p => p.name === v)
           );
           
-          if (validVotes.length !== 2) {
-            console.log(`Invalid votes in 2-impostor mode: ${msg.vote}`);
+          if (validVotes.length !== expectedVoteCount) {
+            console.log(`Invalid votes for ${expectedVoteCount}-impostor mode: expected ${expectedVoteCount}, got ${validVotes.length}`);
             return;
           }
           
           // Check for duplicate votes
           const uniqueVotes = [...new Set(validVotes)];
-          if (uniqueVotes.length !== 2) {
-            console.log(`Duplicate votes in 2-impostors mode: ${msg.vote}`);
+          if (uniqueVotes.length !== expectedVoteCount) {
+            console.log(`Duplicate votes detected: ${msg.vote}`);
             return;
           }
           
           player.vote = validVotes;
         } else {
-          // Original 1-impostor mode - single vote
-          player.vote = [msg.vote];
+          // Single impostor active - single vote
+          player.vote = Array.isArray(msg.vote) ? [msg.vote[0]] : [msg.vote];
         }
 
         // Use players who are still in the game (not removed and grace not expired)
@@ -1831,8 +1844,13 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
 
           let ejectedPlayers = [];
           
-          if (lobby.twoImpostorsOption) {
-            // In 2-impostor mode, eject 2 players with most votes
+          // Calculate active impostor count for ejection logic
+          const playersInGame = getPlayersInGame(lobby);
+          const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
+          const targetEjectionCount = activeImpostors.length;
+          
+          if (targetEjectionCount >= 2) {
+            // Eject multiple players based on active impostor count
             // Handle ties: if tie for second place, both get ejected (could be 3+)
             const sortedVotes = Object.entries(voteCounts)
               .sort((a, b) => {
@@ -1856,8 +1874,8 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
                 ejectedPlayers = [...ejectedPlayers, ...secondPlacePlayers.slice(0, 2 - ejectedPlayers.length)];
               }
               
-              // Limit to 2 players max
-              ejectedPlayers = ejectedPlayers.slice(0, 2);
+              // Limit to target ejection count
+              ejectedPlayers = ejectedPlayers.slice(0, targetEjectionCount);
             } else if (sortedVotes.length === 1) {
               ejectedPlayers = [sortedVotes[0][0]];
             }
