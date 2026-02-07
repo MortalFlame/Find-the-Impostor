@@ -1807,11 +1807,9 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
   startTurnTimer(lobby);
       }
 
-       if (msg.type === 'vote') {
-        // 1. Define playersInGame ONCE at the top of the block
-        const playersInGame = getPlayersInGame(lobby);
-        
+      if (msg.type === 'vote') {
         // Calculate how many impostors are currently active
+        const playersInGame = getPlayersInGame(lobby);
         const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
         const activeImpostorCount = activeImpostors.length;
         const expectedVoteCount = activeImpostorCount;
@@ -1849,8 +1847,10 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
           player.vote = Array.isArray(msg.vote) ? [msg.vote[0]] : [msg.vote];
         }
 
+        // Use players who are still in the game (not removed and grace not expired)
+        // const playersInGame = getPlayersInGame(lobby);
+        
         // Check if all players in game have voted
-        // (We use the variable defined at the top - no need to redefine it here)
         if (playersInGame.every(p => p.vote && p.vote.length > 0)) {
           const voteCounts = {};
           playersInGame.forEach(p => {
@@ -1859,10 +1859,11 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
             });
           });
 
-          let ejectedPlayers = [];
+                    let ejectedPlayers = [];
           
-          // Calculate active impostor count for ejection logic
+          // Use already calculated active impostor count for ejection logic
           const targetEjectionCount = activeImpostors.length;
+
           
           if (targetEjectionCount >= 2) {
             // Eject multiple players based on active impostor count
@@ -2043,7 +2044,6 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
           }
         }
       }
-
 
       if (msg.type === 'impostorGuess') {
         if (lobby.phase !== 'impostorGuess') return;
@@ -2617,14 +2617,12 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
       }, 100);
     }
 
-        // FIX: Send restart state update IMMEDIATELY after reconnection if in results phase
+    // FIX: Send restart state update IMMEDIATELY after reconnection if in results phase
     if (lobby.phase === 'results' && existingSpectator) {
       setTimeout(() => {
         if (player.ws?.readyState === 1) {
           try {
-            // We define it here cleanly. No duplicates.
             const playersInGame = getPlayersInGame(lobby);
-            
             const readyConnectedPlayers = lobby.restartReady.filter(id =>
               lobby.players.some(p => p.id === id && p.ws?.readyState === 1)
             );
@@ -2645,7 +2643,6 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
         }
       }, 200); // Increased delay to ensure lobby assignment is processed first
     }
-
 
     ws.send(JSON.stringify({
       type: 'lobbyAssigned',
