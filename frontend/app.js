@@ -1197,6 +1197,7 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
         }
 
         if (d.type === 'startVoting') {
+          const activeImpostorCount = d.activeImpostorCount || (d.twoImpostorsMode ? 2 : 1);
           stopTurnTimerAnimation();
           stopImpostorGuessTimerAnimation();
           isEjectedImpostor = false;
@@ -1212,8 +1213,13 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
   console.log(`spectatorHasClickedRestart: ${spectatorHasClickedRestart}`);
   console.log(`==================================`);
           
-          if (twoImpostorsMode) {
-            turnEl.textContent = isSpectator ? 'Spectating - Vote for 2 Impostors!' : 'Vote for 2 Impostors! (Select 2 players)';
+          // Use dynamic impostor count from server
+          const activeImpostorCount = d.activeImpostorCount || (twoImpostorsMode ? 2 : 1);
+          
+          if (activeImpostorCount >= 2) {
+            turnEl.textContent = isSpectator ? 
+              `Spectating - Vote for ${activeImpostorCount} Impostors!` : 
+              `Vote for ${activeImpostorCount} Impostors! (Select ${activeImpostorCount} players)`;
           } else {
             turnEl.textContent = isSpectator ? 'Spectating - Vote for the Impostor!' : 'Vote for the Impostor!';
           }
@@ -1229,9 +1235,9 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
               d.players.map(p => `<div class="spectator-vote-btn">${p}</div>`).join('');
           } else {
             let votingHeader = '<h3>Vote</h3>';
-            if (twoImpostorsMode) {
-              votingHeader += '<p style="color:#f39c12; font-size: 12px; margin-top: -5px; margin-bottom: 10px;">Select 2 players you think are impostors</p>';
-              votingHeader += '<div id="voteCountDisplay" style="color:#f39c12; font-weight:bold; margin-bottom: 10px;">Selected: 0/2</div>';
+            if (activeImpostorCount >= 2) {
+              votingHeader += `<p style="color:#f39c12; font-size: 12px; margin-top: -5px; margin-bottom: 10px;">Select ${activeImpostorCount} players you think are impostors</p>`;
+              votingHeader += `<div id="voteCountDisplay" style="color:#f39c12; font-weight:bold; margin-bottom: 10px;">Selected: 0/${activeImpostorCount}</div>`;
             }
             
             voting.innerHTML = votingHeader +
@@ -1240,9 +1246,9 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
                 .map(p => `<button class="vote-btn" onclick="vote('${p}', this)">${p}</button>`)
                 .join('');
             
-            if (twoImpostorsMode) {
+            if (activeImpostorCount >= 2) {
               voting.innerHTML += `
-                <button id="submitVotesBtn" class="button-base" style="margin-top: 10px; background: linear-gradient(135deg, #27ae60, #2ecc71);" onclick="submitVotes()">
+  <button id="submitVotesBtn" class="button-base" style="margin-top: 10px; background: linear-gradient(135deg, #27ae60, #2ecc71);" onclick="submitVotes()">
                   Submit Votes
                 </button>
                 <button id="clearVotesBtn" class="button-base" style="margin-top: 5px; background: linear-gradient(135deg, #e74c3c, #c0392b);" onclick="clearVotes()">
@@ -1763,8 +1769,9 @@ if (isSpectator) {
 function updateVoteCountDisplay() {
   const voteCountElement = document.getElementById('voteCountDisplay');
   if (voteCountElement) {
-    voteCountElement.textContent = `Selected: ${selectedVotes.length}/2`;
-    if (selectedVotes.length === 2) {
+    const targetCount = parseInt(voteCountElement.textContent.split('/')[1]) || 2;
+    voteCountElement.textContent = `Selected: ${selectedVotes.length}/${targetCount}`;
+    if (selectedVotes.length === targetCount) {
       voteCountElement.style.color = '#2ecc71';
     } else {
       voteCountElement.style.color = '#f39c12';
@@ -1779,7 +1786,13 @@ window.vote = (v, btnElement) => {
     return;
   }
   
-  if (twoImpostorsMode) {
+  // Get active impostor count from voting display
+  const voteCountDisplay = document.getElementById('voteCountDisplay');
+  const requireMultipleVotes = voteCountDisplay && voteCountDisplay.textContent.includes('/');
+  const targetVoteCount = voteCountDisplay ? 
+    parseInt(voteCountDisplay.textContent.split('/')[1]) : 1;
+  
+  if (requireMultipleVotes && targetVoteCount >= 2) {
     const index = selectedVotes.indexOf(v);
     
     if (index === -1) {
@@ -1834,8 +1847,12 @@ window.vote = (v, btnElement) => {
 function submitVotes() {
   if (hasSubmittedVotes || selectedVotes.length === 0) return;
   
-  if (twoImpostorsMode) {
-    if (selectedVotes.length !== 2) {
+  const voteCountDisplay = document.getElementById('voteCountDisplay');
+  const targetVoteCount = voteCountDisplay ? 
+    parseInt(voteCountDisplay.textContent.split('/')[1]) : 2;
+    
+  if (targetVoteCount >= 2) {
+    if (selectedVotes.length !== targetVoteCount) {
       const voteCountElement = document.getElementById('voteCountDisplay');
       if (voteCountElement) {
         voteCountElement.style.color = '#e74c3c';
