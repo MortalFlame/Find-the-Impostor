@@ -1856,7 +1856,7 @@ function submitVotes() {
       const voteCountElement = document.getElementById('voteCountDisplay');
       if (voteCountElement) {
         voteCountElement.style.color = '#e74c3c';
-        voteCountElement.textContent = 'Please select exactly 2 players';
+        voteCountElement.textContent = 'Please select exactly ${targetVoteCount} players';
         setTimeout(() => {
           updateVoteCountDisplay();
         }, 2000);
@@ -1866,7 +1866,7 @@ function submitVotes() {
     
     // Check for duplicate votes
     const uniqueVotes = [...new Set(selectedVotes)];
-    if (uniqueVotes.length !== 2) {
+    if (uniqueVotes.length !== targetVoteCount) {
       const voteCountElement = document.getElementById('voteCountDisplay');
       if (voteCountElement) {
         voteCountElement.style.color = '#e74c3c';
