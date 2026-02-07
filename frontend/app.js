@@ -1910,15 +1910,19 @@ function toggleImpostorGuessOption() {
 }
 
 function updateTwoImpostorsToggle() {
+  const gameOptionsContainer = document.getElementById('gameOptionsContainer');
   const twoImpostorsToggle = document.getElementById('twoImpostorsToggle');
-  if (!twoImpostorsToggle) return;
+  
+  if (!gameOptionsContainer || !twoImpostorsToggle) return;
   
   if (isSpectator) {
-    twoImpostorsToggle.style.display = 'none';
+    gameOptionsContainer.style.display = 'none';
     return;
   }
   
-  twoImpostorsToggle.style.display = 'flex';
+  // Show the container for players
+  gameOptionsContainer.style.display = 'flex';
+  
   const checkbox = twoImpostorsToggle.querySelector('input[type="checkbox"]');
   const label = twoImpostorsToggle.querySelector('.toggle-label');
   
@@ -1930,24 +1934,30 @@ function updateTwoImpostorsToggle() {
       label.style.color = '#fff';
       label.style.cursor = 'pointer';
       checkbox.style.cursor = 'pointer';
+      twoImpostorsToggle.style.opacity = '1';
     } else {
       label.style.color = '#95a5a6';
       label.style.cursor = 'not-allowed';
       checkbox.style.cursor = 'not-allowed';
+      twoImpostorsToggle.style.opacity = '0.7';
     }
   }
 }
 
 function updateImpostorGuessToggle() {
+  const gameOptionsContainer = document.getElementById('gameOptionsContainer');
   const impostorGuessToggle = document.getElementById('impostorGuessToggle');
-  if (!impostorGuessToggle) return;
+  
+  if (!gameOptionsContainer || !impostorGuessToggle) return;
   
   if (isSpectator) {
-    impostorGuessToggle.style.display = 'none';
+    gameOptionsContainer.style.display = 'none';
     return;
   }
   
-  impostorGuessToggle.style.display = 'flex';
+  // Show the container for players
+  gameOptionsContainer.style.display = 'flex';
+  
   const checkbox = impostorGuessToggle.querySelector('input[type="checkbox"]');
   const label = impostorGuessToggle.querySelector('.toggle-label');
   
@@ -1959,10 +1969,12 @@ function updateImpostorGuessToggle() {
       label.style.color = '#fff';
       label.style.cursor = 'pointer';
       checkbox.style.cursor = 'pointer';
+      impostorGuessToggle.style.opacity = '1';
     } else {
       label.style.color = '#95a5a6';
       label.style.cursor = 'not-allowed';
       checkbox.style.cursor = 'not-allowed';
+      impostorGuessToggle.style.opacity = '0.7';
     }
   }
 }
@@ -1973,6 +1985,59 @@ function showImpostorGuessInfo() {
 
 function showTwoImpostorsInfo() {
   alert('When enabled, the game will have 2 impostors instead of 1. In voting phase, select 2 players you think are impostors. The top 2 voted players will be ejected. Game winning logic:\n\n• Both impostors voted out → Civilians win\n• No impostors voted out → Impostors win\n• One impostor voted out → Draw\n\nNote: Requires at least 4 players for balanced gameplay.');
+}
+
+// Also update the runDebugMode function:
+function runDebugMode() {
+  console.log("DEBUG: Running in offline mode for JSFiddle");
+
+  // 1. Set Header Info
+  lobbyCodeDisplay.textContent = "5555";
+  playerNameDisplay.textContent = "Alex (Host)";
+  updateConnectionStatus('connected', 'Connected');
+
+  // 2. Set Input values
+  nickname.value = "Alex";
+  lobbyId.value = "5555";
+
+  // 3. Mock Player List (5 players total)
+  const mockPlayers = [
+    { name: "Alex", role: "civilian" }, 
+    { name: "Jordan", role: "impostor" }, 
+    { name: "Taylor", role: "civilian" }, 
+    { name: "Morgan", role: "civilian" }, 
+    { name: "Casey", role: "civilian" }
+  ];
+  updatePlayerList(mockPlayers);
+
+  // 4. Mock Lobby List
+  const mockLobbies = [{
+    id: "5555",
+    host: "alex",
+    playerCount: 5,
+    impostorGuessOption: true,
+    twoImpostorsOption: false,
+    createdAt: Date.now()
+  }];
+  updateLobbyList(mockLobbies);
+
+  // 5. Enable Buttons
+  start.disabled = false;
+  exitLobbyBtn.style.display = 'block';
+  
+  // 6. Set up toggles for host
+  isOwner = true;
+  impostorGuessOption = true;
+  twoImpostorsOption = false;
+  
+  // Update the container display
+  const gameOptionsContainer = document.getElementById('gameOptionsContainer');
+  if (gameOptionsContainer) {
+    gameOptionsContainer.style.display = 'flex';
+  }
+  
+  updateImpostorGuessToggle();
+  updateTwoImpostorsToggle();
 }
 
 join.onclick = () => joinAsPlayer(false);
