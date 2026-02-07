@@ -1205,13 +1205,15 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
           }
         }
 
-        if (d.type === 'startVoting') {
-          const activeImpostorCount = d.activeImpostorCount || (d.twoImpostorsMode ? 2 : 1);
+                if (d.type === 'startVoting') {
           stopTurnTimerAnimation();
           stopImpostorGuessTimerAnimation();
           isEjectedImpostor = false;
           
           twoImpostorsMode = d.twoImpostorsMode || false;
+          
+          // Update global activeImpostorCount from server
+          activeImpostorCount = d.activeImpostorCount || (twoImpostorsMode ? 2 : 1);
           
           selectedVotes = [];
           hasSubmittedVotes = false;
@@ -1220,7 +1222,9 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
   console.log(`isSpectator: ${isSpectator}`);
   console.log(`spectatorWantsToJoin: ${spectatorWantsToJoin}`);
   console.log(`spectatorHasClickedRestart: ${spectatorHasClickedRestart}`);
+  console.log(`activeImpostorCount: ${activeImpostorCount}`);
   console.log(`==================================`);
+
           
           // Use dynamic impostor count from server
           const activeImpostorCount = d.activeImpostorCount || (twoImpostorsMode ? 2 : 1);
@@ -1333,7 +1337,7 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
         }
 
         if (d.type === 'gameEndEarly') {
-          stopTurnTimerAnimation();
+        stopTurnTimerAnimation();
           
           // Hide game mode indicator
           const gameModeIndicator = document.getElementById('gameModeIndicator');
@@ -1342,13 +1346,8 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
             document.body.classList.remove('game-mode-active');
           }
           
-          // Hide game mode indicator
-          const gameModeIndicator = document.getElementById('gameModeIndicator');
-          if (gameModeIndicator) {
-            gameModeIndicator.classList.add('hidden');
-            document.body.classList.remove('game-mode-active');
-          }
-          stopImpostorGuessTimerAnimation();
+        stopImpostorGuessTimerAnimation();
+
           isMyTurn = false;
           currentTurnEndsAt = null;
           isImpostor = false;
@@ -2285,7 +2284,8 @@ document.head.appendChild(style);
 updateConnectionStatus('disconnected');
 safeLog('Game client initialized');
 
-window.addEventListener('DOMContentLoaded', () => {
+// Initialize immediately or wait for DOMContentLoaded
+function initializeGame() {
   setTimeout(() => {
     if (lobbyCard && !lobbyCard.classList.contains('hidden')) {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2297,4 +2297,13 @@ window.addEventListener('DOMContentLoaded', () => {
       startLobbyListAutoRefresh();
     }
   }, 100);
-});
+}
+
+// Run immediately if DOM is already loaded, otherwise wait
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeGame);
+} else {
+  // DOM already loaded, run immediately
+  initializeGame();
+}
+
