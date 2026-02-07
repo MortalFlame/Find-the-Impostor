@@ -60,17 +60,33 @@
         </label>
       </div>
       
-      <!-- Impostor Guess Option Toggle -->
-      <div id="impostorGuessToggle" class="impostor-guess-toggle" style="display: none;">
-        <label class="switch">
-          <input type="checkbox" id="impostorGuessOption" onchange="toggleImpostorGuessOption()">
+      <div id="gameOptionsContainer" style="display: none;">
+  <div class="game-options-row">
+    <div id="twoImpostorsToggle" class="game-option-toggle">
+      <label class="toggle-label">
+        <span class="switch">
+          <input type="checkbox" id="twoImpostorsCheckbox" onchange="toggleTwoImpostorsOption()">
           <span class="slider"></span>
-        </label>
-        <label for="impostorGuessOption" class="toggle-label" onclick="showImpostorGuessInfo()">
-          Impostor last chance
-          <span class="info-icon" title="Click for more info">ⓘ</span>
-        </label>
-      </div>
+        </span>
+        <span class="toggle-text">2 Impostors</span>
+        <span class="info-icon" onclick="showTwoImpostorsInfo()">ⓘ</span>
+      </label>
+    </div>
+    
+    <div class="toggle-separator">|</div>
+    
+    <div id="impostorGuessToggle" class="game-option-toggle">
+      <label class="toggle-label">
+        <span class="switch">
+          <input type="checkbox" id="impostorGuessCheckbox" onchange="toggleImpostorGuessOption()">
+          <span class="slider"></span>
+        </span>
+        <span class="toggle-text">Guess Word</span>
+        <span class="info-icon" onclick="showImpostorGuessInfo()">ⓘ</span>
+      </label>
+    </div>
+  </div>
+</div>
       
       <button id="start" class="button-base" disabled>Start Game</button>
 
