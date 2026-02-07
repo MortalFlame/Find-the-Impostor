@@ -402,8 +402,11 @@ function checkGameEndConditions(lobby, lobbyId) {
   const impostors = lobby.players.filter(p => p.role === 'impostor');
   const connectedImpostors = impostors.filter(p => p.ws?.readyState === 1);
   
-  // Check if we have at least one impostor connected (required for game to continue)
-  if (connectedImpostors.length === 0) {
+  // Check if we have enough impostors to continue
+  // In 2-impostor mode, need at least 1 impostor. In 1-impostor mode, need the impostor.
+  const impostorsNeeded = lobby.twoImpostorsOption ? 1 : 1;
+  
+  if (connectedImpostors.length < impostorsNeeded) {
     const now = Date.now();
     
     const disconnectedImpostors = impostors.filter(p => p.ws?.readyState !== 1 && !p.lastDisconnectTime);
@@ -420,8 +423,10 @@ function checkGameEndConditions(lobby, lobbyId) {
     );
     
     if (longDisconnectedImpostors.length > 0) {
-      console.log(`Game in lobby ${lobbyId} ending: no impostors connected for >${GAME_GRACE_PERIOD/1000}s`);
-      endGameEarly(lobby, 'impostor_left');
+      const reason = lobby.twoImpostorsOption && connectedImpostors.length === 1 ? 
+        'both_impostors_left' : 'impostor_left';
+      console.log(`Game in lobby ${lobbyId} ending: insufficient impostors for >${GAME_GRACE_PERIOD/1000}s`);
+      endGameEarly(lobby, reason);
       return true;
     }
     
@@ -1429,10 +1434,21 @@ wss.on('connection', (ws, req) => {
             const connectedPlayersBeforeExit = lobby.players.filter(p => p.ws?.readyState === 1).length;
             const connectedPlayersAfterExit = connectedPlayersBeforeExit - 1;
             
-            // If player is impostor, end game immediately (no grace period for manual exit)
+            // If player is impostor, check if we should end game
             if (player.role === 'impostor') {
-              shouldEndGameImmediately = true;
-              endGameReason = 'impostor_left';
+              const impostors = lobby.players.filter(p => p.role === 'impostor');
+              const remainingImpostors = impostors.filter(p => p.id !== player.id);
+              const connectedRemainingImpostors = remainingImpostors.filter(p => p.ws?.readyState === 1);
+              
+              // In 2-impostor mode, only end if this was the last/only impostor
+              // In 1-impostor mode, always end when impostor leaves
+              if (!lobby.twoImpostorsOption || connectedRemainingImpostors.length === 0) {
+                shouldEndGameImmediately = true;
+                endGameReason = 'impostor_left';
+                console.log(`Ending game: ${lobby.twoImpostorsOption ? 'all impostors' : 'impostor'} left`);
+              } else {
+                console.log(`1 impostor left, but ${connectedRemainingImpostors.length} remaining. Game continues.`);
+              }
             }
             // If after exit fewer than 3 players remain, end game immediately
             else if (connectedPlayersAfterExit < 3) {
@@ -1486,9 +1502,10 @@ wss.on('connection', (ws, req) => {
             const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
             const connectedImpostors = connectedPlayers.filter(p => p.role === 'impostor');
             
-            // Immediate check: if less than 3 players or no impostor, end game immediately
-            if (connectedPlayers.length < 3 || connectedImpostors.length === 0) {
-              console.log(`Game ending immediately after manual exit: ${connectedPlayers.length} players, ${connectedImpostors.length} impostors`);
+            // Immediate check: if less than 3 players or insufficient impostors, end game immediately
+            const minImpostorsNeeded = lobby.twoImpostorsOption ? 1 : 1;
+            if (connectedPlayers.length < 3 || connectedImpostors.length < minImpostorsNeeded) {
+              console.log(`Game ending after manual exit: ${connectedPlayers.length} players, ${connectedImpostors.length} impostors (need ${minImpostorsNeeded})`);
               endGameEarly(lobby, connectedPlayers.length < 3 ? 'not_enough_players' : 'impostor_left');
             }
           }
