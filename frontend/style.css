@@ -147,14 +147,14 @@ body {
 
 /* Lobby List Styles */
 .lobby-list-container {
-  min-height: 150px !important;
-  max-height: 200px !important;
-  height: auto;
+  min-height: 100px !important;
+  max-height: 150px !important;
+  /* height: auto; */
   overflow: hidden;
   margin-top: 10px;
   background: rgba(13, 17, 28, 0.6);
   border-radius: 14px;
-  padding: 10px;
+  padding: 10px 10px;
   border: 1px solid rgba(106, 139, 255, 0.2);
 }
 
@@ -213,7 +213,7 @@ body {
 .lobby-item {
   background: rgba(20, 25, 40, 0.8);
   border-radius: 10px;
-  /* padding: 12px;*/
+  padding: 8px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -271,6 +271,7 @@ body {
 .lobby-stats {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 12px;
   color: #7f8c8d;
   margin-bottom: 0;       /* Add this */
@@ -290,7 +291,7 @@ body {
   color: white;
   border: none;
   border-radius: 8px;
-  padding: 8px 16px;
+  padding: 6px 12px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -320,8 +321,8 @@ body {
 
 /* Base button with flexbox */
 .button-base {
-  height: 44px;
-  min-height: 44px;
+  height: 38px;
+  min-height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
