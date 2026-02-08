@@ -1205,23 +1205,26 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
           }
         }
 
-                        if (d.type === 'startVoting') {
+                                if (d.type === 'startVoting') {
+          console.log('========== RECEIVED startVoting ==========');
+          console.log('Message data:', JSON.stringify(d));
+          
           stopTurnTimerAnimation();
           stopImpostorGuessTimerAnimation();
           isEjectedImpostor = false;
           
           twoImpostorsMode = d.twoImpostorsMode || false;
           
-          // Use the activeImpostorCount from server (critical!)
-          const activeImpostorCount = d.activeImpostorCount || 1;
-          
           selectedVotes = [];
           hasSubmittedVotes = false;
-
-          console.log(`========== VOTING PHASE ==========`);
+          
+          // Use dynamic impostor count from server
+          const activeImpostorCount = d.activeImpostorCount || (twoImpostorsMode ? 2 : 1);
+          
           console.log(`isSpectator: ${isSpectator}`);
-          console.log(`activeImpostorCount from server: ${activeImpostorCount}`);
-          console.log(`==================================`);
+          console.log(`activeImpostorCount: ${activeImpostorCount}`);
+          console.log(`players array:`, d.players);
+
           
           // Use dynamic impostor count from server
           const activeImpostorCount = d.activeImpostorCount || (twoImpostorsMode ? 2 : 1);
@@ -1239,6 +1242,18 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
           submit.disabled = true;
           isMyTurn = false;
           currentTurnEndsAt = null;
+          
+                    console.log('About to create voting UI...');
+          console.log('voting element exists:', !!voting);
+          
+          if (isSpectator || d.isSpectator) {
+            console.log('Creating spectator voting UI');
+            voting.innerHTML = '<h3>Spectating Votes</h3>' +
+              d.players.map(p => `<div class="spectator-vote-btn">${p}</div>`).join('');
+          } else {
+            console.log('Creating player voting UI');
+            let votingHeader = '<h3>Vote</h3>';
+
           
           if (isSpectator || d.isSpectator) {
             voting.innerHTML = '<h3>Spectating Votes</h3>' +
@@ -1268,6 +1283,10 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
             }
           }
         }
+                  console.log('Voting UI created successfully');
+          console.log('========== END startVoting ==========');
+        }
+
 
         if (d.type === 'impostorGuessPhase') {
           stopTurnTimerAnimation();
