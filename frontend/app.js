@@ -1276,8 +1276,8 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
               `;
             }
           }
-          //console.log('Voting UI created successfully');
-          //console.log('========== END startVoting ==========');
+          console.log('Voting UI created successfully');
+          console.log('========== END startVoting ==========');
         }
                   
         
