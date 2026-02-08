@@ -1960,6 +1960,8 @@ function submitWord() {
 }
 
 function toggleTwoImpostorsOption() {
+  // Only allow owner to toggle
+  if (!isOwner) return;
   const checkbox = document.querySelector('#twoImpostorsToggle input[type="checkbox"]');
   if (!checkbox || !ws || ws.readyState !== WebSocket.OPEN) return;
   
@@ -1970,6 +1972,8 @@ function toggleTwoImpostorsOption() {
 }
 
 function toggleImpostorGuessOption() {
+  // Only allow owner to toggle
+  if (!isOwner) return;
   const checkbox = document.querySelector('#impostorGuessToggle input[type="checkbox"]');
   if (!checkbox || !ws || ws.readyState !== WebSocket.OPEN) return;
   
