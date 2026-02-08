@@ -1754,7 +1754,7 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
           
           startTurnTimer(lobby);
           return;
-                } else if (lobby.phase === 'round2' && lobby.round2.length >= lobby.expectedSubmissions) {
+                        } else if (lobby.phase === 'round2' && lobby.round2.length >= lobby.expectedSubmissions) {
   console.log(`✓ Round2 complete: ${lobby.round2.length}/${lobby.expectedSubmissions} submissions`);
           lobby.phase = 'voting';
           broadcast(lobby, {
@@ -1766,20 +1766,27 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
           });
           
           setTimeout(() => {
-            // Calculate how many impostors are currently active in the game
-            const playersInGame = getPlayersInGame(lobby);
-            const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
-            const activeImpostorCount = activeImpostors.length;
-            
-            broadcast(lobby, {
-              type: 'startVoting',
-              players: lobby.players.map(p => p.name),
-              twoImpostorsMode: lobby.twoImpostorsOption || false,
-              activeImpostorCount: activeImpostorCount // NEW: Dynamic impostor count
-            });
+            try {
+              console.log(`Starting voting phase for lobby ${lobbyId}`);
+              // Calculate how many impostors are currently active in the game
+              const playersInGame = getPlayersInGame(lobby);
+              const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
+              const activeImpostorCount = activeImpostors.length;
+              
+              console.log(`Broadcasting startVoting with ${activeImpostorCount} active impostors`);
+              broadcast(lobby, {
+                type: 'startVoting',
+                players: lobby.players.map(p => p.name),
+                twoImpostorsMode: lobby.twoImpostorsOption || false,
+                activeImpostorCount: activeImpostorCount
+              });
+            } catch (err) {
+              console.error(`Error starting voting phase: ${err.message}`);
+            }
           }, 500);
           return;
         }
+
 
         let nextIndex = (lobby.turn + 1) % lobby.players.length;
         let attempts = 0;
