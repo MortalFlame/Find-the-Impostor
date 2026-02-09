@@ -1360,7 +1360,19 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
                     console.log('Voting UI created successfully');
           console.log('========== END startVoting ==========');
         }
-        
+                if (d.type === 'allVoted') {
+          stopVotingTimerAnimation();
+          
+          // Show countdown message
+          turnEl.textContent = `All votes cast! Results in ${d.countdown} second${d.countdown > 1 ? 's' : ''}...`;
+          
+          // Disable all voting buttons
+          document.querySelectorAll('.vote-btn').forEach(b => {
+            b.style.pointerEvents = 'none';
+            b.style.opacity = '0.5';
+          });
+        }
+
         if (d.type === 'votingTimer') {
           if (d.votingEndsAt) {
             startVotingTimerAnimation(d.votingEndsAt);
@@ -1905,6 +1917,10 @@ window.vote = (v, btnElement) => {
     return;
   }
   
+  // Prevent voting if already submitted
+  if (hasSubmittedVotes) return;
+
+  
   // Get active impostor count from voting display
   const voteCountDisplay = document.getElementById('voteCountDisplay');
   const requireMultipleVotes = voteCountDisplay && voteCountDisplay.textContent.includes('/');
@@ -1937,16 +1953,20 @@ window.vote = (v, btnElement) => {
       voteSubmitTimer = null;
     }
     
-    if (btnElement.classList.contains('selected')) {
+        if (btnElement.classList.contains('selected')) {
       // Deselect
       selectedVotes = [];
       btnElement.classList.remove('selected');
+      hasSubmittedVotes = false;
       
       // Re-enable all buttons
       document.querySelectorAll('.vote-btn').forEach(b => {
         b.style.pointerEvents = 'auto';
         b.classList.remove('selected');
       });
+      
+      // Update turn text
+      turnEl.textContent = isSpectator ? 'Spectating - Vote for the Impostor!' : 'Vote for the Impostor!';
     } else {
       // Select (clear previous selection)
       document.querySelectorAll('.vote-btn').forEach(b => {
@@ -1957,14 +1977,18 @@ window.vote = (v, btnElement) => {
       selectedVotes = [v];
       btnElement.classList.add('selected');
       
-      // Auto-submit after 1.5 seconds (gives time to change)
+            // Auto-submit after 1.5 seconds (gives time to change)
       voteSubmitTimer = setTimeout(() => {
         if (selectedVotes.includes(v) && ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'vote', vote: v }));
-          document.querySelectorAll('.vote-btn').forEach(b => b.style.pointerEvents = 'none');
+          hasSubmittedVotes = true;
           voteSubmitTimer = null;
+          
+          // Show visual feedback that vote was cast
+          turnEl.textContent = `Vote cast for ${v}. Waiting for others...`;
         }
       }, 1500);
+
     }
   }
 };
