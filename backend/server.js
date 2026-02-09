@@ -712,6 +712,220 @@ function startTurnTimer(lobby) {
   });
 }
 
+// Add these TWO new functions after startImpostorGuessTimer:
+
+function startVotingTimer(lobby, lobbyId) {
+  if (lobby.votingTimeout?.timer) {
+    clearTimeout(lobby.votingTimeout.timer);
+    lobby.votingTimeout = null;
+  }
+  
+  lobby.votingEndsAt = Date.now() + 30000;
+  
+  lobby.votingTimeout = {
+    timer: setTimeout(() => {
+      console.log(`Voting timeout in lobby ${lobbyId}`);
+      
+      const playersInGame = getPlayersInGame(lobby);
+      const playersWhoVoted = playersInGame.filter(p => p.vote && p.vote.length > 0);
+      
+      console.log(`Voting timeout: ${playersWhoVoted.length}/${playersInGame.length} players voted`);
+      
+      processVotingResults(lobby, lobbyId);
+    }, 30000)
+  };
+  
+  broadcast(lobby, {
+    type: 'votingTimer',
+    votingEndsAt: lobby.votingEndsAt
+  });
+}
+
+function processVotingResults(lobby, lobbyId) {
+  const playersInGame = getPlayersInGame(lobby);
+  const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
+  const targetEjectionCount = activeImpostors.length;
+  
+  const voteCounts = {};
+  playersInGame.filter(p => p.vote && p.vote.length > 0).forEach(p => {
+    p.vote.forEach(v => {
+      voteCounts[v] = (voteCounts[v] || 0) + 1;
+    });
+  });
+  
+  let ejectedPlayers = [];
+  
+  if (targetEjectionCount >= 2) {
+    const sortedVotes = Object.entries(voteCounts)
+      .sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0].localeCompare(b[0]);
+      });
+    
+    if (sortedVotes.length >= 2) {
+      const topVoteCount = sortedVotes[0][1];
+      const secondVoteCount = sortedVotes[1][1];
+      
+      ejectedPlayers = sortedVotes.filter(([_, count]) => count === topVoteCount).map(([name]) => name);
+      
+      if (ejectedPlayers.length < 2) {
+        const secondPlacePlayers = sortedVotes
+          .filter(([_, count]) => count === secondVoteCount)
+          .map(([name]) => name);
+        ejectedPlayers = [...ejectedPlayers, ...secondPlacePlayers.slice(0, 2 - ejectedPlayers.length)];
+      }
+      
+      ejectedPlayers = ejectedPlayers.slice(0, targetEjectionCount);
+    } else if (sortedVotes.length === 1) {
+      ejectedPlayers = [sortedVotes[0][0]];
+    }
+  } else {
+    let ejected = null;
+    let maxVotes = 0;
+    let isTie = false;
+
+    Object.entries(voteCounts).forEach(([name, count]) => {
+      if (count > maxVotes) {
+        maxVotes = count;
+        ejected = name;
+        isTie = false;
+      } else if (count === maxVotes && name !== ejected) {
+        isTie = true;
+      }
+    });
+
+    if (!isTie && ejected) {
+      ejectedPlayers = [ejected];
+    }
+  }
+  
+  if (ejectedPlayers.length > 0) {
+    const impostors = lobby.players.filter(p => p.role === 'impostor');
+    const ejectedImpostors = impostors.filter(p => ejectedPlayers.includes(p.name));
+    const ejectedImpostorCount = ejectedImpostors.length;
+    
+    if (lobby.impostorGuessOption && ejectedImpostorCount > 0) {
+      lobby.phase = 'impostorGuess';
+      lobby.ejectedPlayers = ejectedPlayers;
+      
+      broadcast(lobby, {
+        type: 'impostorGuessPhase',
+        ejected: ejectedPlayers,
+        isImpostor: false,
+        guessEndsAt: Date.now() + 30000
+      });
+      
+      ejectedImpostors.forEach(impostor => {
+        if (impostor.ws?.readyState === 1) {
+          impostor.ws.send(JSON.stringify({
+            type: 'impostorGuessPhase',
+            ejected: ejectedPlayers,
+            isImpostor: true,
+            guessEndsAt: Date.now() + 30000
+          }));
+        }
+      });
+      
+      startImpostorGuessTimer(lobby);
+      return;
+    }
+    
+    let winner;
+    if (lobby.twoImpostorsOption) {
+      if (ejectedImpostorCount === 2) {
+        winner = 'Civilians';
+      } else if (ejectedImpostorCount === 0) {
+        winner = 'Impostors';
+      } else if (ejectedImpostorCount === 1) {
+        winner = 'Draw';
+      }
+    } else {
+      const impostor = lobby.players.find(p => p.role === 'impostor');
+      winner = (ejectedPlayers[0] === impostor?.name) ? 'Civilians' : 'Impostor';
+    }
+    
+    broadcast(lobby, {
+      type: 'gameEnd',
+      roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+      votes: Object.fromEntries(playersInGame.filter(p => p.vote).map(p => [p.name, p.vote])),
+      ejected: ejectedPlayers,
+      secretWord: lobby.word,
+      hint: lobby.hint,
+      winner,
+      twoImpostorsMode: lobby.twoImpostorsOption || false
+    });
+    
+    lobby.spectators.forEach(s => {
+      if (s.ws?.readyState === 1) {
+        try {
+          s.ws.send(JSON.stringify({
+            type: 'gameEnd',
+            roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+            votes: Object.fromEntries(playersInGame.filter(p => p.vote).map(p => [p.name, p.vote])),
+            ejected: ejectedPlayers,
+            secretWord: lobby.word,
+            hint: lobby.hint,
+            winner,
+            twoImpostorsMode: lobby.twoImpostorsOption || false,
+            isSpectator: true,
+            wantsToJoinNextGame: s.wantsToJoinNextGame || false
+          }));
+        } catch (err) {
+          console.log(`Failed to send gameEnd to spectator ${s.name}`);
+        }
+      }
+    });
+    
+    lobby.phase = 'results';
+    lobby.lastTimeBelowThreePlayers = null;
+    lobby.turnEndsAt = null;
+    lobby.ejectedPlayers = null;
+    lobby.impostorGuesses = null;
+    lobby.votingTimeout = null;
+    
+    if (lobby.turnTimeout?.timer) {
+      clearTimeout(lobby.turnTimeout.timer);
+      lobby.turnTimeout = null;
+    }
+    
+    lobby.spectators.forEach(s => {
+      if (s.wantsToJoinNextGame && !lobby.spectatorsWantingToJoin.includes(s.id)) {
+        lobby.spectatorsWantingToJoin.push(s.id);
+      }
+    });
+    
+    sendRestartUpdates(lobby);
+    broadcastLobbyList();
+  } else {
+    const winner = lobby.twoImpostorsOption ? 'Impostors' : 'Impostor';
+    
+    broadcast(lobby, {
+      type: 'gameEnd',
+      roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
+      votes: Object.fromEntries(playersInGame.filter(p => p.vote).map(p => [p.name, p.vote])),
+      secretWord: lobby.word,
+      hint: lobby.hint,
+      winner,
+      twoImpostorsMode: lobby.twoImpostorsOption || false
+    });
+    
+    lobby.phase = 'results';
+    lobby.lastTimeBelowThreePlayers = null;
+    lobby.turnEndsAt = null;
+    lobby.ejectedPlayers = null;
+    lobby.impostorGuesses = null;
+    lobby.votingTimeout = null;
+    
+    if (lobby.turnTimeout?.timer) {
+      clearTimeout(lobby.turnTimeout.timer);
+      lobby.turnTimeout = null;
+    }
+    
+    sendRestartUpdates(lobby);
+    broadcastLobbyList();
+  }
+}
+
 function skipCurrentPlayer(lobby, isTimeout = false) {
   console.log(`Skipping player ${lobby.players[lobby.turn]?.name}, timeout: ${isTimeout}`);
   
@@ -804,7 +1018,7 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
       startTurnTimer(lobby);
       return;
     }
-  } else if (lobby.phase === 'round2') {
+} else if (lobby.phase === 'round2') {
   if (lobby.round2.length >= lobby.expectedSubmissions) {
     console.log(`✓ Round2 complete after timeout: ${lobby.round2.length}/${lobby.expectedSubmissions} submissions`);
       lobby.phase = 'voting';
@@ -826,8 +1040,11 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
               type: 'startVoting',
               players: lobby.players.map(p => p.name),
               twoImpostorsMode: lobby.twoImpostorsOption || false,
-              activeImpostorCount: activeImpostorCount // NEW: Dynamic impostor count
+              activeImpostorCount: activeImpostorCount
             });
+            
+            // Start voting timer
+            startVotingTimer(lobby, lobbyId);
           }, 500);
     }
   }
@@ -927,6 +1144,8 @@ lobby.spectators.forEach(s => {
     }, 30000)
   };
 }
+
+
 
   function sendRestartUpdates(lobby) {
     // IMPORTANT: Only send restart updates during results or lobby phase
@@ -1465,15 +1684,65 @@ wss.on('connection', (ws, req) => {
           } else {
             // Mark player as removed (manual exit, no grace)
             player.removed = true;
+            
+            const wasTheirTurn = (lobby.phase === 'round1' || lobby.phase === 'round2') && 
+                                 lobby.players[lobby.turn]?.id === player.id;
+            const playerIndex = lobby.players.findIndex(p => p.id === player.id);
+            const playerName = player.name;
+            
+            // If it was their turn, handle it before removal
+            if (wasTheirTurn && (lobby.phase === 'round1' || lobby.phase === 'round2')) {
+              console.log(`Exiting player ${playerName} was on turn, handling immediately`);
+              
+              // Clear turn timer
+              if (lobby.turnTimeout?.timer) {
+                clearTimeout(lobby.turnTimeout.timer);
+                lobby.turnTimeout = null;
+              }
+              
+              // Add empty word entry
+              const entry = { name: playerName, word: '' };
+              if (lobby.phase === 'round1') {
+                lobby.round1.push(entry);
+              } else if (lobby.phase === 'round2') {
+                lobby.round2.push(entry);
+              }
+            }
+            
+            // Remove player
             lobby.players = lobby.players.filter(p => p.id !== player.id);
             lobby.restartReady = lobby.restartReady.filter(id => id !== player.id);
             
-            // FIX: Update expectedSubmissions if game is in active round phase
-  if (lobby.phase === 'round1' || lobby.phase === 'round2') {
-    const playersInGame = getPlayersInGame(lobby);
-    lobby.expectedSubmissions = playersInGame.length;
-    console.log(`Player exit: Updated expectedSubmissions to ${lobby.expectedSubmissions} (${playersInGame.length} players remain)`);
-  }
+            // Adjust turn index if needed
+            if (lobby.turn !== undefined && playerIndex !== -1) {
+              if (playerIndex < lobby.turn) {
+                lobby.turn--;
+              } else if (playerIndex === lobby.turn) {
+                // Current player removed, index now points to next player
+                if (lobby.turn >= lobby.players.length) {
+                  lobby.turn = 0;
+                }
+              }
+            }
+            
+            // Update expectedSubmissions and advance turn if needed
+            if (lobby.phase === 'round1' || lobby.phase === 'round2') {
+              const playersInGame = getPlayersInGame(lobby);
+              lobby.expectedSubmissions = playersInGame.length;
+              console.log(`Player exit: Updated expectedSubmissions to ${lobby.expectedSubmissions}`);
+              
+              if (wasTheirTurn) {
+                // Check if round is now complete
+                const currentRound = lobby.phase === 'round1' ? lobby.round1 : lobby.round2;
+                if (currentRound.length >= lobby.expectedSubmissions) {
+                  console.log(`Round complete after player exit`);
+                  skipCurrentPlayer(lobby, false);
+                } else {
+                  // Start turn for next player
+                  startTurnTimer(lobby);
+                }
+              }
+            }
             
             if (lobby.owner === player.id && lobby.players.length > 0) {
               const newOwner = lobby.players.find(p => p.ws?.readyState === 1);
@@ -1780,6 +2049,8 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
                 twoImpostorsMode: lobby.twoImpostorsOption || false,
                 activeImpostorCount: activeImpostorCount
               });
+              // Start voting timer
+              startVotingTimer(lobby, lobbyId);
             } catch (err) {
               console.error(`Error starting voting phase: ${err.message}`);
             }
@@ -1821,240 +2092,55 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
       }
 
       if (msg.type === 'vote') {
-        // Calculate how many impostors are currently active
         const playersInGame = getPlayersInGame(lobby);
         const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
         const activeImpostorCount = activeImpostors.length;
         const expectedVoteCount = activeImpostorCount;
         
-        console.log(`Vote received: activeImpostors=${activeImpostorCount}, expectedVotes=${expectedVoteCount}`);
+        console.log(`Vote received from ${player.name}: activeImpostors=${activeImpostorCount}`);
         
-        // Handle both single vote and array of votes based on ACTIVE impostor count
         if (expectedVoteCount >= 2) {
-          // Expecting an array of votes when 2+ impostors active
           if (!Array.isArray(msg.vote)) {
-            console.log(`Invalid vote format for ${expectedVoteCount}-impostor mode: ${msg.vote}`);
+            console.log(`Invalid vote format`);
             return;
           }
           
-          // Validate votes - must match expected count
           const validVotes = msg.vote.filter(v => 
             v && v !== player.name && lobby.players.some(p => p.name === v)
           );
           
           if (validVotes.length !== expectedVoteCount) {
-            console.log(`Invalid votes for ${expectedVoteCount}-impostor mode: expected ${expectedVoteCount}, got ${validVotes.length}`);
+            console.log(`Invalid vote count`);
             return;
           }
           
-          // Check for duplicate votes
           const uniqueVotes = [...new Set(validVotes)];
           if (uniqueVotes.length !== expectedVoteCount) {
-            console.log(`Duplicate votes detected: ${msg.vote}`);
+            console.log(`Duplicate votes detected`);
             return;
           }
           
           player.vote = validVotes;
         } else {
-          // Single impostor active - single vote
           player.vote = Array.isArray(msg.vote) ? [msg.vote[0]] : [msg.vote];
         }
 
-        // Use players who are still in the game (not removed and grace not expired)
-        // const playersInGame = getPlayersInGame(lobby);
+        console.log(`${player.name} voted for: ${player.vote.join(', ')}`);
         
-        // Check if all players in game have voted
         if (playersInGame.every(p => p.vote && p.vote.length > 0)) {
-          const voteCounts = {};
-          playersInGame.forEach(p => {
-            p.vote.forEach(v => {
-              voteCounts[v] = (voteCounts[v] || 0) + 1;
-            });
+          console.log('All players have voted, processing results');
+          
+          if (lobby.votingTimeout?.timer) {
+            clearTimeout(lobby.votingTimeout.timer);
+            lobby.votingTimeout = null;
+          }
+          
+          broadcast(lobby, {
+            type: 'allVoted',
+            countdown: 3
           });
-
-                    let ejectedPlayers = [];
           
-          // Use already calculated active impostor count for ejection logic
-          const targetEjectionCount = activeImpostors.length;
-
-          
-          if (targetEjectionCount >= 2) {
-            // Eject multiple players based on active impostor count
-            // Handle ties: if tie for second place, both get ejected (could be 3+)
-            const sortedVotes = Object.entries(voteCounts)
-              .sort((a, b) => {
-                if (b[1] !== a[1]) return b[1] - a[1];
-                return a[0].localeCompare(b[0]);
-              });
-            
-            // Get top voted players, handling ties
-            if (sortedVotes.length >= 2) {
-              const topVoteCount = sortedVotes[0][1];
-              const secondVoteCount = sortedVotes[1][1];
-              
-              // Add all players with top vote count
-              ejectedPlayers = sortedVotes.filter(([_, count]) => count === topVoteCount).map(([name]) => name);
-              
-              // If we need more players to reach 2, add players with second highest count
-              if (ejectedPlayers.length < 2) {
-                const secondPlacePlayers = sortedVotes
-                  .filter(([_, count]) => count === secondVoteCount)
-                  .map(([name]) => name);
-                ejectedPlayers = [...ejectedPlayers, ...secondPlacePlayers.slice(0, 2 - ejectedPlayers.length)];
-              }
-              
-              // Limit to target ejection count
-              ejectedPlayers = ejectedPlayers.slice(0, targetEjectionCount);
-            } else if (sortedVotes.length === 1) {
-              ejectedPlayers = [sortedVotes[0][0]];
-            }
-          } else {
-            let ejected = null;
-            let maxVotes = 0;
-            let isTie = false;
-
-            Object.entries(voteCounts).forEach(([name, count]) => {
-              if (count > maxVotes) {
-                maxVotes = count;
-                ejected = name;
-                isTie = false;
-              } else if (count === maxVotes && name !== ejected) {
-                isTie = true;
-              }
-            });
-
-            if (!isTie && ejected) {
-              ejectedPlayers = [ejected];
-            }
-          }
-
-          if (ejectedPlayers.length > 0) {
-            const impostors = lobby.players.filter(p => p.role === 'impostor');
-            const ejectedImpostors = impostors.filter(p => ejectedPlayers.includes(p.name));
-            const ejectedImpostorCount = ejectedImpostors.length;
-            
-            if (lobby.impostorGuessOption && ejectedImpostorCount > 0) {
-              lobby.phase = 'impostorGuess';
-              lobby.ejectedPlayers = ejectedPlayers;
-              
-              // Send message to civilians and spectators
-              broadcast(lobby, {
-                type: 'impostorGuessPhase',
-                ejected: ejectedPlayers,
-                isImpostor: false,
-                guessEndsAt: Date.now() + 30000
-              });
-              
-              // Send individual messages to each ejected impostor
-              ejectedImpostors.forEach(impostor => {
-                if (impostor.ws?.readyState === 1) {
-                  impostor.ws.send(JSON.stringify({
-                    type: 'impostorGuessPhase',
-                    ejected: ejectedPlayers,
-                    isImpostor: true,
-                    guessEndsAt: Date.now() + 30000
-                  }));
-                }
-              });
-              
-              startImpostorGuessTimer(lobby);
-              
-              return;
-            }
-            
-            let winner;
-            if (lobby.twoImpostorsOption) {
-              if (ejectedImpostorCount === 2) {
-                winner = 'Civilians';
-              } else if (ejectedImpostorCount === 0) {
-                winner = 'Impostors';
-              } else if (ejectedImpostorCount === 1) {
-                winner = 'Draw';
-              }
-            } else {
-              const impostor = lobby.players.find(p => p.role === 'impostor');
-              winner = (ejectedPlayers[0] === impostor?.name) ? 'Civilians' : 'Impostor';
-            }
-            
-            broadcast(lobby, {
-              type: 'gameEnd',
-              roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-              votes: Object.fromEntries(playersInGame.map(p => [p.name, p.vote])),
-              ejected: ejectedPlayers,
-              secretWord: lobby.word,
-              hint: lobby.hint,
-              winner,
-              twoImpostorsMode: lobby.twoImpostorsOption || false
-            });
-            
-            // Send individual messages to spectators with their join state
-            lobby.spectators.forEach(s => {
-              if (s.ws?.readyState === 1) {
-                try {
-                  s.ws.send(JSON.stringify({
-                    type: 'gameEnd',
-                    roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-                    votes: Object.fromEntries(playersInGame.map(p => [p.name, p.vote])),
-                    ejected: ejectedPlayers,
-                    secretWord: lobby.word,
-                    hint: lobby.hint,
-                    winner,
-                    twoImpostorsMode: lobby.twoImpostorsOption || false,
-                    isSpectator: true,
-                    wantsToJoinNextGame: s.wantsToJoinNextGame || false
-                  }));
-                } catch (err) {
-                  console.log(`Failed to send gameEnd to spectator ${s.name}`);
-                }
-              }
-            });
-            
-            lobby.phase = 'results';
-            lobby.lastTimeBelowThreePlayers = null;
-            lobby.turnEndsAt = null;
-            lobby.ejectedPlayers = null;
-            lobby.impostorGuesses = null;
-            
-            if (lobby.turnTimeout?.timer) {
-              clearTimeout(lobby.turnTimeout.timer);
-              lobby.turnTimeout = null;
-            }
-            
-            // Send restart updates so spectators see their current join state
-            sendRestartUpdates(lobby);
-            broadcastLobbyList();
-          } else {
-            // No one ejected (tie)
-            console.log(`Voting resulted in a tie in lobby ${lobbyId}`);
-            // In case of tie, end the game
-            const impostors = lobby.players.filter(p => p.role === 'impostor');
-            const winner = lobby.twoImpostorsOption ? 'Impostors' : 'Impostor';
-            
-            broadcast(lobby, {
-              type: 'gameEnd',
-              roles: lobby.players.map(p => ({ name: p.name, role: p.role })),
-              votes: Object.fromEntries(playersInGame.map(p => [p.name, p.vote])),
-              secretWord: lobby.word,
-              hint: lobby.hint,
-              winner,
-              twoImpostorsMode: lobby.twoImpostorsOption || false
-            });
-            
-            lobby.phase = 'results';
-            lobby.lastTimeBelowThreePlayers = null;
-            lobby.turnEndsAt = null;
-            lobby.ejectedPlayers = null;
-            lobby.impostorGuesses = null;
-            
-            if (lobby.turnTimeout?.timer) {
-              clearTimeout(lobby.turnTimeout.timer);
-              lobby.turnTimeout = null;
-            }
-            
-            // Send restart updates so spectators see their current join state
-            sendRestartUpdates(lobby);
-            broadcastLobbyList();
-          }
+          setTimeout(() => processVotingResults(lobby, lobbyId), 3000);
         }
       }
 
@@ -2178,6 +2264,9 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
         // Get players who were in the previous game (have roles)
         const playersWithRoles = lobby.players.filter(p => p.role);
         
+        // Get players who joined during results phase (no role yet)
+        const newPlayersInResults = lobby.players.filter(p => !p.role && p.ws?.readyState === 1);
+        
         // Get connected players who were in the previous game and have pressed restart
         const readyConnectedPlayers = lobby.restartReady.filter(id => 
           connectedPlayers.some(p => p.id === id && p.role)
@@ -2221,7 +2310,10 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
         }
         
         // Now check if we have enough participants (at least 3)
-        const totalParticipants = readyConnectedPlayers.length + spectatorsWantingToJoin.length;
+        // Count: ready previous players + spectators wanting to join + new players who joined during results
+        const totalParticipants = readyConnectedPlayers.length + spectatorsWantingToJoin.length + newPlayersInResults.length;
+        
+        console.log(`Restart check: ${readyConnectedPlayers.length} ready players + ${spectatorsWantingToJoin.length} spectators + ${newPlayersInResults.length} new players = ${totalParticipants} total`);
         
         if (totalParticipants >= 3) {
           console.log(`Restart condition met for lobby ${lobbyId}: All previous players ready + ${totalParticipants} total participants`);
