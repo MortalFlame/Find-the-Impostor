@@ -972,6 +972,23 @@ function connect() {
           impostorGuessOption = d.impostorGuessOption || false;
           twoImpostorsOption = d.twoImpostorsOption || false;
           
+                    // Update header badges immediately
+          const headerImpostorText = document.getElementById('headerImpostorText');
+          const headerGuessBadge = document.getElementById('headerGuessBadge');
+          
+          if (headerImpostorText) {
+            headerImpostorText.textContent = twoImpostorsOption ? 2 : 1;
+          }
+          
+          if (headerGuessBadge) {
+            if (impostorGuessOption) {
+              headerGuessBadge.classList.remove('hidden');
+            } else {
+              headerGuessBadge.classList.add('hidden');
+            }
+          }
+
+          
           // FIX: Properly restore spectator join state from server
           if (d.isSpectator && d.wantsToJoinNextGame !== undefined) {
             spectatorWantsToJoin = d.wantsToJoinNextGame;
@@ -1051,23 +1068,25 @@ function connect() {
           lobbyCard.classList.add('hidden');
           gameCard.classList.remove('hidden');
           
-          // Update header game mode badges
+                    // Update header game mode badges
           const headerImpostorBadge = document.getElementById('headerImpostorBadge');
           const headerImpostorText = document.getElementById('headerImpostorText');
           const headerGuessBadge = document.getElementById('headerGuessBadge');
           
           if (headerImpostorBadge && headerImpostorText) {
-            const impostorCount = d.twoImpostorsMode ? 2 : 1;
+            // Set impostor count dynamically
+            const impostorCount = twoImpostorsOption ? 2 : 1;
             headerImpostorText.textContent = impostorCount;
             
             if (headerGuessBadge) {
-              if (d.impostorGuessOption || impostorGuessOption) {
+              if (impostorGuessOption) {
                 headerGuessBadge.classList.remove('hidden');
               } else {
                 headerGuessBadge.classList.add('hidden');
               }
             }
           }
+
           
           exitLobbyBtn.style.display = 'block';
           
