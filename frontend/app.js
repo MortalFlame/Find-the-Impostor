@@ -251,6 +251,7 @@ function startTurnTimerAnimation(turnEndsAt) {
   }
   
   turnTimerEl.classList.remove('hidden');
+  console.log('Timer animation started for turn ending at:', turnEndsAt, 'isMyTurn:', isMyTurn);
   
   function animateTimer() {
     const remainingMs = getRemainingTimeMs();
@@ -1275,8 +1276,11 @@ if (currentPlayerObj && currentPlayerObj.connected === false) {
               
               if (d.turnEndsAt) {
                 currentTurnEndsAt = d.turnEndsAt;
-                if (isMyTurn) {
+                                if (isMyTurn) {
+                  console.log('Starting timer animation: isMyTurn=true, turnEndsAt=', d.turnEndsAt);
                   startTurnTimerAnimation(currentTurnEndsAt);
+                } else {
+                  console.log('Not starting timer: isMyTurn=false, currentPlayer=', d.currentPlayer, 'myName=', myPlayerName);
                 }
               }
             }
@@ -1917,8 +1921,11 @@ window.vote = (v, btnElement) => {
     return;
   }
   
-  // Prevent voting if already submitted
-  if (hasSubmittedVotes) return;
+    // Prevent voting if already submitted (but allow deselection)
+  if (hasSubmittedVotes && !btnElement.classList.contains('selected')) {
+    return;
+  }
+
 
   
   // Get active impostor count from voting display
@@ -1953,8 +1960,14 @@ window.vote = (v, btnElement) => {
       voteSubmitTimer = null;
     }
     
-        if (btnElement.classList.contains('selected')) {
+                if (btnElement.classList.contains('selected')) {
       // Deselect
+      // Clear any pending auto-submit timer
+      if (voteSubmitTimer) {
+        clearTimeout(voteSubmitTimer);
+        voteSubmitTimer = null;
+      }
+      
       selectedVotes = [];
       btnElement.classList.remove('selected');
       hasSubmittedVotes = false;
