@@ -2128,7 +2128,7 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
         console.log(`${player.name} voted for: ${player.vote.join(', ')}`);
         
         if (playersInGame.every(p => p.vote && p.vote.length > 0)) {
-          console.log('All players have voted, processing results');
+          console.log('All players have voted, processing results immediately');
           
           if (lobby.votingTimeout?.timer) {
             clearTimeout(lobby.votingTimeout.timer);
@@ -2137,10 +2137,10 @@ console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissi
           
           broadcast(lobby, {
             type: 'allVoted',
-            countdown: 3
+            countdown: 1
           });
           
-          setTimeout(() => processVotingResults(lobby, lobbyId), 3000);
+          setTimeout(() => processVotingResults(lobby, lobbyId), 1000);
         }
       }
 
