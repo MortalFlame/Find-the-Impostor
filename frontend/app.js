@@ -1551,6 +1551,7 @@ if (d.type === 'gameEndEarly') {
             // Call updateGameOptions for players in results
             if (isOwner) {
               updateGameOptions();
+            }
           } else {
             restart.classList.remove('hidden');
             restart.innerText = 'Join Next Game';
@@ -1558,6 +1559,7 @@ if (d.type === 'gameEndEarly') {
             restart.style.opacity = '1';
             hasClickedRestart = false;
           }
+
           
           turnEl.textContent = 'Game Ended Early';
         }
@@ -1771,6 +1773,7 @@ if (d.type === 'gameEndEarly') {
             // Call updateGameOptions for players in results
             if (isOwner) {
               updateGameOptions();
+            }
           } else {
             restart.classList.remove('hidden');
             restart.innerText = 'Join Next Game';
@@ -1778,6 +1781,7 @@ if (d.type === 'gameEndEarly') {
             restart.style.opacity = '1';
             hasClickedRestart = false;
           }
+
           
           turnEl.textContent = isSpectator ? 'Spectating - Game Over' : 'Game Over - Results';
         }
