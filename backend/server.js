@@ -541,9 +541,37 @@ function startGame(lobby) {
   });
   
   const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
-  if (connectedPlayers.length < 3) {
+    if (connectedPlayers.length < 3) {
     console.log(`Not enough connected players to start (${connectedPlayers.length} connected)`);
     return;
+  }
+  
+  // Validate player count for 2 impostor mode
+  if (lobby.twoImpostorsOption && connectedPlayers.length < 5) {
+    console.log(`Not enough players for 2 impostor mode (${connectedPlayers.length} connected, need 5)`);
+    // Disable 2 impostor mode and proceed with normal mode
+    lobby.twoImpostorsOption = false;
+    
+    // Notify all players
+    broadcast(lobby, {
+      type: 'lobbyUpdate',
+      players: lobby.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        connected: p.ws?.readyState === 1,
+        role: p.role || null
+      })),
+      spectators: lobby.spectators.map(s => ({
+        id: s.id,
+        name: s.name,
+        connected: s.ws?.readyState === 1
+      })),
+      owner: lobby.owner,
+      phase: lobby.phase,
+      impostorGuessOption: lobby.impostorGuessOption || false,
+      twoImpostorsOption: false,
+      message: 'Not enough players for 2 Impostor mode. Switched to 1 Impostor.'
+    });
   }
 
   lobby.phase = 'round1';
@@ -568,7 +596,7 @@ function startGame(lobby) {
   const shuffledConnectedPlayers = [...connectedPlayers].sort(() => Math.random() - 0.5);
 
   // ASSIGN ROLES TO ALL CONNECTED PLAYERS (not filtered by existing roles)
-  if (lobby.twoImpostorsOption && connectedPlayers.length >= 4) {
+  if (lobby.twoImpostorsOption && connectedPlayers.length >= 5) {
     // Assign 2 impostors
     const impostorIndices = new Set();
     while (impostorIndices.size < 2) {
@@ -1895,7 +1923,7 @@ wss.on('connection', (ws, req) => {
 }
       player.lastActionTime = Date.now();
 
-      if (msg.type === 'toggleTwoImpostors' && lobby.phase === 'lobby') {
+            if (msg.type === 'toggleTwoImpostors' && (lobby.phase === 'lobby' || lobby.phase === 'results')) {
         if (lobby.owner !== player.id) return;
         
         lobby.twoImpostorsOption = msg.enabled;
@@ -1922,7 +1950,8 @@ wss.on('connection', (ws, req) => {
         broadcastLobbyList();
       }
 
-      if (msg.type === 'toggleImpostorGuess' && lobby.phase === 'lobby') {
+            if (msg.type === 'toggleImpostorGuess' && (lobby.phase === 'lobby' || lobby.phase === 'results')) {
+
         if (lobby.owner !== player.id) return;
         
         lobby.impostorGuessOption = msg.enabled;
@@ -2315,8 +2344,12 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
         
         console.log(`Restart check: ${readyConnectedPlayers.length} ready players + ${spectatorsWantingToJoin.length} spectators + ${newPlayersInResults.length} new players = ${totalParticipants} total`);
         
-        if (totalParticipants >= 3) {
-          console.log(`Restart condition met for lobby ${lobbyId}: All previous players ready + ${totalParticipants} total participants`);
+                // Check minimum players based on game mode
+        const minPlayersNeeded = lobby.twoImpostorsOption ? 5 : 3;
+        
+        if (totalParticipants >= minPlayersNeeded) {
+          console.log(`Restart condition met for lobby ${lobbyId}: All previous players ready + ${totalParticipants} total participants (need ${minPlayersNeeded} for ${lobby.twoImpostorsOption ? '2-impostor' : 'normal'} mode)`);
+
           
           // Convert spectators who want to join into players
           const spectatorsToJoin = lobby.spectators.filter(s => 
@@ -2367,8 +2400,9 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
           lobby.spectatorsWantingToJoin = [];
           lobby.restartReady = []; // Clear restart ready for new game
           startGame(lobby);
-        } else {
-          console.log(`Not enough participants to restart: ${totalParticipants}/3`);
+                } else {
+          const minPlayersNeeded = lobby.twoImpostorsOption ? 5 : 3;
+          console.log(`Not enough participants to restart: ${totalParticipants}/${minPlayersNeeded} (${lobby.twoImpostorsOption ? '2-impostor mode needs 5' : 'normal mode needs 3'})`);
         }
       }
 
