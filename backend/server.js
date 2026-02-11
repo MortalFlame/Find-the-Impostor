@@ -1979,10 +1979,26 @@ wss.on('connection', (ws, req) => {
       }
 
       if (msg.type === 'startGame' && lobby.phase === 'lobby') {
-        if (lobby.owner !== player.id) return;
-        startGame(lobby);
-        broadcastLobbyList();
-      }
+  if (lobby.owner !== player.id) return;
+  
+  const connectedPlayers = lobby.players.filter(p => p.ws?.readyState === 1);
+  
+  if (connectedPlayers.length < 3) {
+    try {
+      ws.send(JSON.stringify({ 
+        type: 'error', 
+        message: `Need at least 3 connected players to start (currently ${connectedPlayers.length})` 
+      }));
+    } catch (err) {
+      // Ignore send error
+    }
+    return;
+  }
+  
+  startGame(lobby);
+  broadcastLobbyList();
+}
+
 
       if (msg.type === 'submitWord') {
         const currentPlayer = lobby.players[lobby.turn];
