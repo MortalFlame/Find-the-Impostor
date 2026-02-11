@@ -404,7 +404,8 @@ function checkGameEndConditions(lobby, lobbyId) {
   
   // Check if we have enough impostors to continue
   // In 2-impostor mode, need at least 1 impostor. In 1-impostor mode, need the impostor.
-  const impostorsNeeded = lobby.twoImpostorsOption ? 1 : 1;
+  const impostorsNeeded = 1; // Need at least 1 impostor in both 1 and 2-impostor modes
+
   
   if (connectedImpostors.length < impostorsNeeded) {
     const now = Date.now();
@@ -772,7 +773,8 @@ function startVotingTimer(lobby, lobbyId) {
 function processVotingResults(lobby, lobbyId) {
   const playersInGame = getPlayersInGame(lobby);
   const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
-  const targetEjectionCount = activeImpostors.length;
+  const targetEjectionCount = lobby.twoImpostorsOption ? 2 : 1;
+
   
   const voteCounts = {};
   playersInGame.filter(p => p.vote && p.vote.length > 0).forEach(p => {
