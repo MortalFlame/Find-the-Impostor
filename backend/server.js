@@ -1233,6 +1233,98 @@ lobby.spectators.forEach(s => {
       }
     });
   }
+  
+function checkAndTriggerRestart(lobby, lobbyId) {
+  // Only check during results phase
+  if (lobby.phase !== 'results') return;
+  
+  const now = Date.now();
+  const playersWithRoles = lobby.players.filter(p => p.role);
+  const connectedPlayersFromPreviousGame = playersWithRoles.filter(p => 
+    p.ws?.readyState === 1 && !p.removed
+  );
+  
+  // Check if there are still disconnected players within grace
+  const disconnectedWithinGrace = playersWithRoles.filter(p => 
+    p.ws?.readyState !== 1 && 
+    !p.removed && 
+    p.lastDisconnectTime && 
+    (now - p.lastDisconnectTime <= RESULTS_GRACE_PERIOD)
+  );
+  
+  // If waiting for disconnected players to reconnect, don't restart yet
+  if (disconnectedWithinGrace.length > 0) {
+    console.log(`Waiting for ${disconnectedWithinGrace.length} disconnected player(s) to reconnect`);
+    return;
+  }
+  
+  // Check if ALL connected players from previous game are ready
+  const allConnectedPlayersReady = connectedPlayersFromPreviousGame.length > 0 &&
+    connectedPlayersFromPreviousGame.every(p => lobby.restartReady.includes(p.id));
+  
+  if (!allConnectedPlayersReady) {
+    console.log(`Not all connected players ready: ${lobby.restartReady.length}/${connectedPlayersFromPreviousGame.length}`);
+    return;
+  }
+  
+  // Calculate total participants
+  const newPlayersInResults = lobby.players.filter(p => !p.role && p.ws?.readyState === 1);
+  const readyConnectedPlayers = lobby.restartReady.filter(id => 
+    connectedPlayersFromPreviousGame.some(p => p.id === id)
+  );
+  const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
+    const spectator = lobby.spectators.find(s => s.id === id);
+    return spectator && spectator.ws?.readyState === 1;
+  });
+  
+  const totalParticipants = readyConnectedPlayers.length + spectatorsWantingToJoin.length + newPlayersInResults.length;
+  const minPlayersNeeded = lobby.twoImpostorsOption ? 5 : 3;
+  
+  console.log(`Restart check: ${readyConnectedPlayers.length} ready + ${spectatorsWantingToJoin.length} spectators + ${newPlayersInResults.length} new = ${totalParticipants} total (need ${minPlayersNeeded})`);
+  
+  if (totalParticipants >= minPlayersNeeded) {
+    console.log(`✓ Auto-triggering restart: All conditions met`);
+    
+    // Convert spectators to players
+    const spectatorsToJoin = lobby.spectators.filter(s => 
+      s.ws?.readyState === 1 && s.wantsToJoinNextGame
+    );
+    
+    spectatorsToJoin.forEach(spectator => {
+      const spectatorIndex = lobby.spectators.findIndex(s => s.id === spectator.id);
+      if (spectatorIndex !== -1) {
+        lobby.spectators.splice(spectatorIndex, 1);
+        spectator.isSpectator = false;
+        spectator.wantsToJoinNextGame = false;
+        spectator.role = null;
+        spectator.vote = [];
+        spectator.removed = false;
+        spectator.lastDisconnectTime = null;
+        lobby.players.push(spectator);
+        
+        let cleanName = spectator.name.replace('👁️ ', '');
+        if (/^Spectator-\d+$/.test(cleanName)) {
+          cleanName = `Player-${Math.floor(Math.random() * 1000)}`;
+        }
+        spectator.name = cleanName;
+        
+        try {
+          spectator.ws.send(JSON.stringify({
+            type: 'roleChanged',
+            message: 'You are now a player!',
+            isSpectator: false,
+            playerName: cleanName
+          }));
+        } catch (err) {}
+      }
+    });
+    
+    lobby.spectatorsWantingToJoin = [];
+    lobby.restartReady = [];
+    startGame(lobby);
+  }
+}
+
 
 function cleanupLobby(lobby, lobbyId) {
   const now = Date.now();
@@ -1314,7 +1406,7 @@ if (lobby.turn !== undefined && lobby.turn >= lobby.players.length) {
 }
 
   
-  // Clean up spectators
+    // Clean up spectators
   lobby.spectators = lobby.spectators.filter(s => {
     // If connected, keep
     if (s.ws?.readyState === 1) return true;
@@ -1332,9 +1424,9 @@ if (lobby.turn !== undefined && lobby.turn >= lobby.players.length) {
       return false;
     }
     
-    // Check grace period
+    // Check grace period expiration
     if (s.lastDisconnectTime && now - s.lastDisconnectTime > spectatorGracePeriod) {
-      console.log(`Removing disconnected spectator after ${spectatorGracePeriod/1000}s: ${s.name}`);
+      console.log(`Removing disconnected spectator after ${spectatorGracePeriod/1000}s: ${s.name}, wantsToJoinNextGame: ${s.wantsToJoinNextGame}`);
       hasChanges = true;
       s.removed = true;
       
@@ -1342,11 +1434,20 @@ if (lobby.turn !== undefined && lobby.turn >= lobby.players.length) {
       if (wantingIndex !== -1) {
         lobby.spectatorsWantingToJoin.splice(wantingIndex, 1);
         restartStateChanged = true;
+        console.log(`  Removed ${s.name} from spectatorsWantingToJoin after grace period expired`);
       }
       return false;
     }
+    
+    // Keep spectators within grace period (preserves wantsToJoinNextGame state)
+    if (s.lastDisconnectTime) {
+      const timeDisconnected = Math.ceil((now - s.lastDisconnectTime) / 1000);
+      console.log(`Keeping disconnected spectator ${s.name} within grace (${timeDisconnected}s/${spectatorGracePeriod/1000}s), wantsToJoinNextGame: ${s.wantsToJoinNextGame}`);
+    }
+    
     return true;
   });
+
   
   // DELETE EMPTY LOBBIES with grace period logic
   if (lobby.players.length === 0 && lobby.spectators.length === 0) {
@@ -1808,10 +1909,28 @@ wss.on('connection', (ws, req) => {
           }
           
           // Only send restart updates during results phase
-          if ((lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) && 
-              (lobby.phase === 'results' || lobby.phase === 'lobby')) {
-            sendRestartUpdates(lobby);
-          }
+if ((lobby.restartReady.length > 0 || lobby.spectatorsWantingToJoin.length > 0) && 
+    (lobby.phase === 'results' || lobby.phase === 'lobby')) {
+  sendRestartUpdates(lobby);
+  
+  // Check if restart should trigger after player exit
+  checkAndTriggerRestart(lobby, lobbyId);
+}
+
+          
+          // If in results phase, re-check restart conditions after player exit
+if (lobby.phase === 'results' && lobby.players.length > 0) {
+  // Send restart updates to refresh everyone's counter
+  sendRestartUpdates(lobby);
+  
+  // Log for debugging
+  const connectedPlayersWithRoles = lobby.players.filter(p => p.role && p.ws?.readyState === 1);
+  const readyCount = lobby.restartReady.filter(id => 
+    connectedPlayersWithRoles.some(p => p.id === id)
+  ).length;
+  console.log(`After exit in results: ${readyCount}/${connectedPlayersWithRoles.length} players ready, ${lobby.spectatorsWantingToJoin.length} spectators wanting to join`);
+}
+
           
           // Check if lobby is now empty and delete it (only if in lobby phase)
           if (lobby.players.length === 0 && lobby.spectators.length === 0) {
@@ -2331,17 +2450,22 @@ const spectatorsWantingToJoin = lobby.spectatorsWantingToJoin.filter(id => {
   return isConnected || withinGracePeriod;
 });
         
-        // First, check if all previous game players are accounted for
-        const disconnectedPlayersRemaining = playersWithRoles.filter(p => 
-          p.ws?.readyState !== 1 && !p.removed && p.lastDisconnectTime && 
-          (Date.now() - p.lastDisconnectTime <= RESULTS_GRACE_PERIOD)
-        );
-        
-        // If there are still disconnected players within grace period, wait
-        if (disconnectedPlayersRemaining.length > 0) {
-          console.log(`Waiting for ${disconnectedPlayersRemaining.length} disconnected players to reconnect`);
-          return;
-        }
+        // Check if there are disconnected players from previous game still within grace period
+const now = Date.now();
+const disconnectedPlayersRemaining = playersWithRoles.filter(p => 
+  p.ws?.readyState !== 1 && 
+  !p.removed && 
+  p.lastDisconnectTime && 
+  (now - p.lastDisconnectTime <= RESULTS_GRACE_PERIOD)
+);
+
+// If there are disconnected players within grace period, wait for them
+if (disconnectedPlayersRemaining.length > 0) {
+  const timeRemaining = Math.ceil((RESULTS_GRACE_PERIOD - (now - disconnectedPlayersRemaining[0].lastDisconnectTime)) / 1000);
+  console.log(`Waiting for ${disconnectedPlayersRemaining.length} disconnected player(s): ${disconnectedPlayersRemaining.map(p => p.name).join(', ')} (${timeRemaining}s remaining)`);
+  return;
+}
+
         
         // Now check if all connected players from previous game are ready
         const connectedPlayersFromPreviousGame = playersWithRoles.filter(p => p.ws?.readyState === 1);
