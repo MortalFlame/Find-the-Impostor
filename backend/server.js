@@ -6,7 +6,8 @@ const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
-app.use(express.static('frontend'));
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, () => console.log('Server running'));
