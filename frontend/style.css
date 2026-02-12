@@ -1205,7 +1205,7 @@ input:disabled + .slider {
   overflow: visible;
 }
 
-/* Game options row - NO flex-wrap to force same line */
+/* Game options row - FORCED SAME LINE, NO WRAPPING */
 .game-options-row {
   display: flex;
   align-items: center;
@@ -1214,7 +1214,7 @@ input:disabled + .slider {
   width: 100%;
   position: relative;
   overflow: visible;
-  flex-wrap: wrap; /* CRITICAL: Prevent wrapping */
+  flex-wrap: nowrap;        /* ← CRITICAL: prevents wrapping */
 }
 
 /* Individual toggle container - compact for mobile */
@@ -1226,23 +1226,34 @@ input:disabled + .slider {
   min-width: 0; /* Allow shrinking */
 }
 
+/* Small screens – allow column stacking, hide separator, shrink text */
 @media (max-width: 380px) {
   .game-options-row {
+    flex-wrap: wrap;        /* allow wrapping on very small screens */
     flex-direction: column;
     align-items: stretch;
   }
-
-/* Separator between toggles */
-.toggle-separator {
-  color: rgba(106, 139, 255, 0.4);
-  font-weight: bold;
-  padding: 0 4px;
-  flex-shrink: 0;
-  line-height: 22px;
-  height: 22px;
-  display: none;
-  align-items: center;
-}
+  .toggle-separator {
+    display: none;
+  }
+  .toggle-label {
+    font-size: 11px;
+    gap: 3px;
+  }
+  .switch {
+    width: 36px;
+    height: 18px;
+  }
+  .slider:before {
+    height: 14px;
+    width: 14px;
+    transform: translateX(18px); /* adjust for smaller switch */
+  }
+  .info-icon {
+    font-size: 10px;
+    width: 12px;
+    height: 12px;
+  }
 }
 
 /* Toggle labels - more compact */
