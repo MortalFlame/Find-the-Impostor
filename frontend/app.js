@@ -2124,101 +2124,119 @@ function submitWord() {
   input.value = '';
 }
 
-function toggleTwoImpostorsOption() {
+function toggleTwoImpostorsOption(checkboxElement) {
   // Only allow owner to toggle
   if (!isOwner) return;
-  const checkbox = document.querySelector('#twoImpostorsToggle input[type="checkbox"]');
-  if (!checkbox || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!checkboxElement || !ws || ws.readyState !== WebSocket.OPEN) return;
   
   ws.send(JSON.stringify({ 
     type: 'toggleTwoImpostors', 
-    enabled: checkbox.checked 
+    enabled: checkboxElement.checked 
   }));
 }
 
-function toggleImpostorGuessOption() {
+function toggleImpostorGuessOption(checkboxElement) {
   // Only allow owner to toggle
   if (!isOwner) return;
-  const checkbox = document.querySelector('#impostorGuessToggle input[type="checkbox"]');
-  if (!checkbox || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!checkboxElement || !ws || ws.readyState !== WebSocket.OPEN) return;
   
   ws.send(JSON.stringify({ 
     type: 'toggleImpostorGuess', 
-    enabled: checkbox.checked 
+    enabled: checkboxElement.checked 
   }));
 }
 
 function updateGameOptions() {
-  const gameOptionsContainer = document.getElementById('gameOptionsContainer');
+  // --- LOBBY TOGGLES (visible in lobby card) ---
+  const lobbyContainer = document.getElementById('gameOptionsContainer');
   const twoImpostorsToggle = document.getElementById('twoImpostorsToggle');
   const impostorGuessToggle = document.getElementById('impostorGuessToggle');
   
-  if (!gameOptionsContainer || !twoImpostorsToggle || !impostorGuessToggle) return;
-  
-  // Hide entire container for spectators
+  // --- RESULTS TOGGLES (visible in game card during results) ---
+  const resultsContainer = document.getElementById('gameOptionsContainerResults');
+  const twoImpostorsToggleResults = document.getElementById('twoImpostorsToggleResults');
+  const impostorGuessToggleResults = document.getElementById('impostorGuessToggleResults');
+
+  // Hide everything for spectators
   if (isSpectator) {
-    gameOptionsContainer.style.display = 'none';
+    if (lobbyContainer) lobbyContainer.style.display = 'none';
+    if (resultsContainer) resultsContainer.style.display = 'none';
     return;
   }
-  
-  // Determine current phase
+
+  // ----- LOBBY TOGGLES VISIBILITY -----
   const isInLobby = lobbyCard && !lobbyCard.classList.contains('hidden');
-  const isInResults = !isInLobby && restart && !restart.classList.contains('hidden');
-  
-  // Show container only in lobby or results phase
-  if (isInLobby || isInResults) {
-    gameOptionsContainer.style.display = 'flex';
-  } else {
-    gameOptionsContainer.style.display = 'none';
-    return;
+  if (isInLobby && lobbyContainer) {
+    lobbyContainer.style.display = 'flex';
+  } else if (lobbyContainer) {
+    lobbyContainer.style.display = 'none';
   }
-  
-  // Use server-sent counts instead of DOM querying
-const totalPlayers = currentPlayerCount + currentSpectatorsWantingCount;
-const hasEnoughForTwoImpostors = totalPlayers >= 5;
-  
-  // Update Two Impostors toggle
-  const twoImpostorsCheckbox = twoImpostorsToggle.querySelector('input[type="checkbox"]');
-  const twoImpostorsLabel = twoImpostorsToggle.querySelector('.toggle-label');
-  
-  if (twoImpostorsCheckbox && twoImpostorsLabel) {
-    twoImpostorsCheckbox.checked = twoImpostorsOption;
-    
-    // Disable if not owner OR not enough players
-    const canToggle = isOwner && hasEnoughForTwoImpostors;
-    twoImpostorsCheckbox.disabled = !canToggle;
-    
-    if (canToggle) {
-      twoImpostorsLabel.style.color = '#fff';
-      twoImpostorsLabel.style.cursor = 'pointer';
-      twoImpostorsCheckbox.style.cursor = 'pointer';
-      twoImpostorsToggle.style.opacity = '1';
-    } else {
-      twoImpostorsLabel.style.color = '#95a5a6';
-      twoImpostorsLabel.style.cursor = 'not-allowed';
-      twoImpostorsCheckbox.style.cursor = 'not-allowed';
-      twoImpostorsToggle.style.opacity = '0.7';
+
+  // ----- RESULTS TOGGLES VISIBILITY -----
+  const isInResults = !isInLobby && restart && !restart.classList.contains('hidden');
+  if (isInResults && resultsContainer) {
+    resultsContainer.style.display = 'flex';
+  } else if (resultsContainer) {
+    resultsContainer.style.display = 'none';
+  }
+
+  // ----- UPDATE BOTH TOGGLE STATES -----
+  const totalPlayers = currentPlayerCount + currentSpectatorsWantingCount;
+  const hasEnoughForTwoImpostors = totalPlayers >= 5;
+
+  // Update LOBBY toggles
+  if (twoImpostorsToggle) {
+    const checkbox = twoImpostorsToggle.querySelector('input[type="checkbox"]');
+    const label = twoImpostorsToggle.querySelector('.toggle-label');
+    if (checkbox && label) {
+      checkbox.checked = twoImpostorsOption;
+      const canToggle = isOwner && hasEnoughForTwoImpostors;
+      checkbox.disabled = !canToggle;
+      label.style.color = canToggle ? '#fff' : '#95a5a6';
+      label.style.cursor = canToggle ? 'pointer' : 'not-allowed';
+      checkbox.style.cursor = canToggle ? 'pointer' : 'not-allowed';
+      twoImpostorsToggle.style.opacity = canToggle ? '1' : '0.7';
     }
   }
-  
-  // Update Impostor Guess toggle
-  const impostorGuessCheckbox = impostorGuessToggle.querySelector('input[type="checkbox"]');
-  const impostorGuessLabel = impostorGuessToggle.querySelector('.toggle-label');
-  
-  if (impostorGuessCheckbox && impostorGuessLabel) {
-    impostorGuessCheckbox.checked = impostorGuessOption;
-    impostorGuessCheckbox.disabled = !isOwner;
-    
-    if (isOwner) {
-      impostorGuessLabel.style.color = '#fff';
-      impostorGuessLabel.style.cursor = 'pointer';
-      impostorGuessCheckbox.style.cursor = 'pointer';
-      impostorGuessToggle.style.opacity = '1';
-    } else {
-      impostorGuessLabel.style.color = '#95a5a6';
-      impostorGuessLabel.style.cursor = 'not-allowed';
-      impostorGuessCheckbox.style.cursor = 'not-allowed';
-      impostorGuessToggle.style.opacity = '0.7';
+
+  if (impostorGuessToggle) {
+    const checkbox = impostorGuessToggle.querySelector('input[type="checkbox"]');
+    const label = impostorGuessToggle.querySelector('.toggle-label');
+    if (checkbox && label) {
+      checkbox.checked = impostorGuessOption;
+      checkbox.disabled = !isOwner;
+      label.style.color = isOwner ? '#fff' : '#95a5a6';
+      label.style.cursor = isOwner ? 'pointer' : 'not-allowed';
+      checkbox.style.cursor = isOwner ? 'pointer' : 'not-allowed';
+      impostorGuessToggle.style.opacity = isOwner ? '1' : '0.7';
+    }
+  }
+
+  // Update RESULTS toggles (same logic, different elements)
+  if (twoImpostorsToggleResults) {
+    const checkbox = twoImpostorsToggleResults.querySelector('input[type="checkbox"]');
+    const label = twoImpostorsToggleResults.querySelector('.toggle-label');
+    if (checkbox && label) {
+      checkbox.checked = twoImpostorsOption;
+      const canToggle = isOwner && hasEnoughForTwoImpostors;
+      checkbox.disabled = !canToggle;
+      label.style.color = canToggle ? '#fff' : '#95a5a6';
+      label.style.cursor = canToggle ? 'pointer' : 'not-allowed';
+      checkbox.style.cursor = canToggle ? 'pointer' : 'not-allowed';
+      twoImpostorsToggleResults.style.opacity = canToggle ? '1' : '0.7';
+    }
+  }
+
+  if (impostorGuessToggleResults) {
+    const checkbox = impostorGuessToggleResults.querySelector('input[type="checkbox"]');
+    const label = impostorGuessToggleResults.querySelector('.toggle-label');
+    if (checkbox && label) {
+      checkbox.checked = impostorGuessOption;
+      checkbox.disabled = !isOwner;
+      label.style.color = isOwner ? '#fff' : '#95a5a6';
+      label.style.cursor = isOwner ? 'pointer' : 'not-allowed';
+      checkbox.style.cursor = isOwner ? 'pointer' : 'not-allowed';
+      impostorGuessToggleResults.style.opacity = isOwner ? '1' : '0.7';
     }
   }
 }
