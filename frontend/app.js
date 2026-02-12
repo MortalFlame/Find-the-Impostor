@@ -72,6 +72,8 @@ let reconnectDelay = 2000;
 let hasShownConnectionWarning = false;
 let hasClickedRestart = false;
 let turnTimer = null;
+let currentPlayerCount = 0;
+let currentSpectatorsWantingCount = 0;
 let currentTurnTime = 30;
 let spectatorWantsToJoin = false;
 let myPlayerName = '';
@@ -1072,6 +1074,8 @@ function connect() {
         }
 
         if (d.type === 'lobbyUpdate') {
+          // Store player counts
+  currentPlayerCount = d.players ? d.players.filter(p => p.connected).length : 0;
           updatePlayerList(d.players, d.spectators);
           // Update impostor count in header if game is active
           if (!gameCard.classList.contains('hidden')) {
@@ -1260,12 +1264,6 @@ if (isSpectator && d.wantsToJoinNextGame !== undefined) {
             currentTurnEndsAt = null;
           } else {
             isMyTurn = d.currentPlayer === myPlayerName;
-            const currentPlayerObj = d.players?.find(p => p.name === d.currentPlayer);
-if (currentPlayerObj && currentPlayerObj.connected === false) {
-  stopTurnTimerAnimation();
-  turnEl.textContent = `Waiting for ${d.currentPlayer} to reconnect...`;
-  return;
-}
             
             if (isSpectator) {
               turnEl.textContent = `Spectating - Turn: ${d.currentPlayer}`;
@@ -1786,6 +1784,7 @@ if (d.type === 'gameEndEarly') {
         }
 
         if (d.type === 'restartUpdate') {
+          currentSpectatorsWantingCount = d.spectatorsWantingToJoin || 0;
           console.log(`=== RESTART UPDATE ===`);
   console.log(`isSpectator: ${isSpectator}, wantsToJoin: ${d.wantsToJoin}`);
   console.log(`readyCount: ${d.readyCount}, totalPlayers: ${d.totalPlayers}`);
@@ -2175,25 +2174,9 @@ function updateGameOptions() {
     return;
   }
   
-  // Count current players (players in lobby + spectators wanting to join)
-  const playerItems = document.querySelectorAll('.player-item:not(.spectator-item)');
-  const currentPlayerCount = playerItems.length;
-  
-  // Count spectators wanting to join (only during results)
-  let spectatorsWantingCount = 0;
-  if (isInResults) {
-    const spectatorItems = document.querySelectorAll('.spectator-item');
-    spectatorItems.forEach(item => {
-      // Check if this spectator wants to join (you could mark this in DOM or track separately)
-      // For now, we'll use the global spectatorWantsToJoin flag if viewing as spectator
-      if (spectatorWantsToJoin) {
-        spectatorsWantingCount = 1;
-      }
-    });
-  }
-  
-  const totalPlayers = currentPlayerCount + spectatorsWantingCount;
-  const hasEnoughForTwoImpostors = totalPlayers >= 5;
+  // Use server-sent counts instead of DOM querying
+const totalPlayers = currentPlayerCount + currentSpectatorsWantingCount;
+const hasEnoughForTwoImpostors = totalPlayers >= 5;
   
   // Update Two Impostors toggle
   const twoImpostorsCheckbox = twoImpostorsToggle.querySelector('input[type="checkbox"]');
