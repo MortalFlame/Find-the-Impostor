@@ -137,6 +137,32 @@
 
       <div id="voting"></div>
       <div id="results"></div>
+      <!-- RESULTS PHASE OPTIONS (visible only during results) -->
+<div id="gameOptionsContainerResults" style="display: none;">
+  <div class="game-options-row">
+    <div id="twoImpostorsToggleResults" class="game-option-toggle">
+      <label class="toggle-label">
+        <span class="switch">
+          <input type="checkbox" id="twoImpostorsCheckboxResults" onchange="toggleTwoImpostorsOption(this)">
+          <span class="slider"></span>
+        </span>
+        <span class="toggle-text">2 Impostors</span>
+        <span class="info-icon prevent-toggle" data-info="twoImpostors">ⓘ</span>
+      </label>
+    </div>
+    <div class="toggle-separator">|</div>
+    <div id="impostorGuessToggleResults" class="game-option-toggle">
+      <label class="toggle-label">
+        <span class="switch">
+          <input type="checkbox" id="impostorGuessCheckboxResults" onchange="toggleImpostorGuessOption(this)">
+          <span class="slider"></span>
+        </span>
+        <span class="toggle-text">Guess Word</span>
+        <span class="info-icon prevent-toggle" data-info="impostorGuess">ⓘ</span>
+      </label>
+    </div>
+  </div>
+</div>
 
       <button id="restart" class="button-base hidden">Restart Game</button>
 
