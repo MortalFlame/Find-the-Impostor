@@ -867,6 +867,7 @@ input:disabled {
     flex: 1 1 auto;
     text-align: left;   /* restore original */
   }
+}
 
 /* Roles section - align role text */
 .role-results-item {
@@ -1235,6 +1236,7 @@ input:disabled + .slider {
   height: 22px;
   display: none;
   align-items: center;
+}
 }
 
 /* Toggle labels - more compact */
