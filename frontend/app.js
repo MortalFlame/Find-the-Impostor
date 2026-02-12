@@ -2173,18 +2173,16 @@ function updateGameOptions() {
   }
 
   // ----- RESULTS TOGGLES VISIBILITY -----
-const isInResults = !isInLobby && restart && !restart.classList.contains('hidden');
-// Also check the actual game phase – results toggles should ONLY show during 'results' phase
-const currentPhase = document.querySelector('.game-card:not(.hidden)') ? 
-                     (turnEl.textContent.includes('Game Over') ? 'results' : 'playing') : 
-                     'lobby';
-const shouldShowResultsToggles = isInResults && currentPhase === 'results';
-
-if (shouldShowResultsToggles && resultsContainer) {
-  resultsContainer.style.display = 'flex';
-} else if (resultsContainer) {
-  resultsContainer.style.display = 'none';
-}
+  // Only show during results phase (restart button visible AND game card active AND not in lobby)
+  const isInResults = !isInLobby && 
+                      gameCard && !gameCard.classList.contains('hidden') && 
+                      restart && !restart.classList.contains('hidden');
+  
+  if (isInResults && resultsContainer) {
+    resultsContainer.style.display = 'flex';
+  } else if (resultsContainer) {
+    resultsContainer.style.display = 'none';
+  }
 
   // ----- UPDATE BOTH TOGGLE STATES -----
   const totalPlayers = currentPlayerCount + currentSpectatorsWantingCount;
@@ -2246,10 +2244,6 @@ if (shouldShowResultsToggles && resultsContainer) {
     }
   }
 }
-
-// Delete updateTwoImpostorsToggle() and updateImpostorGuessToggle()
-// Replace all calls to them with updateGameOptions()
-
 
 // --- TOOLTIP LOGIC ---
 
