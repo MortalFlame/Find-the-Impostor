@@ -1459,3 +1459,13 @@ input:disabled + .slider {
   font-weight: bold !important;
   border: 2px solid #6a8bff !important;
 }
+
+/* Add spacing above restart button in results screen */
+#gameOptionsContainerResults {
+  margin-bottom: 12px;
+}
+
+/* Optional: ensure the restart button itself has some top margin if the above isn't enough */
+#restart {
+  margin-top: 4px;
+}
