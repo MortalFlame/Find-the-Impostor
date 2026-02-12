@@ -1057,7 +1057,6 @@ function connect() {
           }
           
           if (isSpectator) {
-            nickname.value = nickname.value.startsWith('👁️ ') ? nickname.value : `👁️ ${nickname.value.trim()}`;
             nickname.disabled = true;
           }
           
