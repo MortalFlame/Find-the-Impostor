@@ -1490,11 +1490,61 @@ if (hasChanges && (lobby.phase === 'round1' || lobby.phase === 'round2')) {
     // Check if round is now complete after removals
     const currentRound = lobby.phase === 'round1' ? lobby.round1 : lobby.round2;
     const submissionsInGame = currentRound.filter(entry =>
-  playersInGame.some(p => p.name === entry.name)
-).length;
-if (submissionsInGame >= lobby.expectedSubmissions) {
+      playersInGame.some(p => p.name === entry.name)
+    ).length;
+    
+    if (submissionsInGame >= lobby.expectedSubmissions) {
       console.log(`Cleanup: Round now complete after player removal`);
-      skipCurrentPlayer(lobby, false);
+      
+      if (lobby.phase === 'round1') {
+        lobby.phase = 'round2';
+        // Recalculate expected submissions for round2
+        const playersInGame = getPlayersInGame(lobby);
+        lobby.expectedSubmissions = playersInGame.length;
+        console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissions`);
+        
+        lobby.turn = 0;
+        for (let i = 0; i < lobby.players.length; i++) {
+          if (lobby.players[i]?.ws?.readyState === 1) {
+            lobby.turn = i;
+            break;
+          }
+        }
+        
+        broadcast(lobby, {
+          type: 'turnUpdate',
+          phase: 'round2',
+          round1: lobby.round1,
+          round2: lobby.round2,
+          currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
+          turnEndsAt: lobby.turnEndsAt
+        });
+        
+        startTurnTimer(lobby);
+      } else if (lobby.phase === 'round2') {
+        lobby.phase = 'voting';
+        broadcast(lobby, {
+          type: 'turnUpdate',
+          phase: 'round2',
+          round1: lobby.round1,
+          round2: lobby.round2,
+          currentPlayer: 'Voting Phase'
+        });
+        
+        setTimeout(() => {
+          const playersInGame = getPlayersInGame(lobby);
+          const activeImpostors = playersInGame.filter(p => p.role === 'impostor');
+          const activeImpostorCount = activeImpostors.length;
+          
+          broadcast(lobby, {
+            type: 'startVoting',
+            players: playersInGame.map(p => p.name),
+            twoImpostorsMode: lobby.twoImpostorsOption || false,
+            activeImpostorCount
+          });
+          startVotingTimer(lobby, lobbyId);
+        }, 500);
+      }
     }
   }
 }
