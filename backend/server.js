@@ -1057,9 +1057,14 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
   
   const playersInGame = getPlayersInGame(lobby);
   
-  if (lobby.phase === 'round1') {
-  if (lobby.round1.length >= lobby.expectedSubmissions) {
-    console.log(`✓ Round1 complete: ${lobby.round1.length}/${lobby.expectedSubmissions} submissions`);
+  // FIX: Count only submissions from players still in game
+if (lobby.phase === 'round1') {
+  const submissionsInGame = lobby.round1.filter(entry =>
+    playersInGame.some(p => p.name === entry.name)
+  ).length;
+  
+  if (submissionsInGame >= lobby.expectedSubmissions) {
+    console.log(`✓ Round1 complete after skip: ${submissionsInGame}/${lobby.expectedSubmissions} submissions (${lobby.round1.length} total entries)`);
     lobby.phase = 'round2';
     
     // UPDATE: Recalculate expected submissions for round2 based on who's still in game
@@ -1072,25 +1077,30 @@ function skipCurrentPlayer(lobby, isTimeout = false) {
       if (lobby.players[i]?.ws?.readyState === 1) {
         lobby.turn = i;
         break;
-        }
       }
-      
-      broadcast(lobby, {
-        type: 'turnUpdate',
-        phase: 'round1',
-        round1: lobby.round1,
-        round2: lobby.round2,
-        currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
-        turnEndsAt: lobby.turnEndsAt
-      });
-      
-      startTurnTimer(lobby);
-      return;
     }
+    
+    broadcast(lobby, {
+      type: 'turnUpdate',
+      phase: 'round1',
+      round1: lobby.round1,
+      round2: lobby.round2,
+      currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
+      turnEndsAt: lobby.turnEndsAt
+    });
+    
+    startTurnTimer(lobby);
+    return;
+  }
 } else if (lobby.phase === 'round2') {
-  if (lobby.round2.length >= lobby.expectedSubmissions) {
-    console.log(`✓ Round2 complete after timeout: ${lobby.round2.length}/${lobby.expectedSubmissions} submissions`);
-      lobby.phase = 'voting';
+  const submissionsInGame = lobby.round2.filter(entry =>
+    playersInGame.some(p => p.name === entry.name)
+  ).length;
+  
+  if (submissionsInGame >= lobby.expectedSubmissions) {
+    console.log(`✓ Round2 complete after skip: ${submissionsInGame}/${lobby.expectedSubmissions} submissions (${lobby.round2.length} total entries)`);
+    lobby.phase = 'voting';
+
       broadcast(lobby, {
         type: 'turnUpdate',
         phase: 'round2',
@@ -1939,16 +1949,22 @@ wss.on('connection', (ws, req) => {
               console.log(`Player exit: Updated expectedSubmissions to ${lobby.expectedSubmissions}`);
               
               if (wasTheirTurn) {
-                // Check if round is now complete
-                const currentRound = lobby.phase === 'round1' ? lobby.round1 : lobby.round2;
-                if (currentRound.length >= lobby.expectedSubmissions) {
-                  console.log(`Round complete after player exit`);
-                  skipCurrentPlayer(lobby, false);
-                } else {
-                  // Start turn for next player
-                  startTurnTimer(lobby);
-                }
-              }
+  // FIX: Check if round is now complete (count only active players)
+  const currentRound = lobby.phase === 'round1' ? lobby.round1 : lobby.round2;
+  const submissionsInGame = currentRound.filter(entry =>
+    playersInGame.some(p => p.name === entry.name)
+  ).length;
+  
+  if (submissionsInGame >= lobby.expectedSubmissions) {
+    console.log(`Round complete after player exit: ${submissionsInGame}/${lobby.expectedSubmissions} submissions (${currentRound.length} total entries)`);
+    skipCurrentPlayer(lobby, false);
+  } else {
+    console.log(`Round not complete after player exit: ${submissionsInGame}/${lobby.expectedSubmissions} submissions. Continuing...`);
+    // Start turn for next player
+    startTurnTimer(lobby);
+  }
+}
+
             }
             
             if (lobby.owner === player.id && lobby.players.length > 0) {
@@ -2238,36 +2254,50 @@ if (lobby.phase === 'results' && lobby.players.length > 0) {
         console.log(`  Players in game: ${playersInGame.length}`);
         console.log(`  Checking: ${lobby.phase === 'round1' ? lobby.round1.length : lobby.round2.length} >= ${playersInGame.length}`);
         
-        if (lobby.phase === 'round1' && lobby.round1.length >= lobby.expectedSubmissions) {
-          console.log(`✓ Advancing to round2`);
-          lobby.phase = 'round2';
-          // Recalculate expected submissions for round2
-  const playersStillInGame = getPlayersInGame(lobby);
-  lobby.expectedSubmissions = playersStillInGame.length;
-console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissions`);
-          
-          lobby.turn = 0;
-          for (let i = 0; i < lobby.players.length; i++) {
-            if (lobby.players[i]?.ws?.readyState === 1) {
-              lobby.turn = i;
-              break;
-            }
-          }
-          
-          broadcast(lobby, {
-            type: 'turnUpdate',
-            phase: 'round1',
-            round1: lobby.round1,
-            round2: lobby.round2,
-            currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
-            turnEndsAt: lobby.turnEndsAt
-          });
-          
-          startTurnTimer(lobby);
-          return;
-                        } else if (lobby.phase === 'round2' && lobby.round2.length >= lobby.expectedSubmissions) {
-  console.log(`✓ Round2 complete: ${lobby.round2.length}/${lobby.expectedSubmissions} submissions`);
-          lobby.phase = 'voting';
+        // FIX: Count only submissions from players still in game
+if (lobby.phase === 'round1') {
+  const submissionsInGame = lobby.round1.filter(entry =>
+    playersInGame.some(p => p.name === entry.name)
+  ).length;
+  
+  if (submissionsInGame >= lobby.expectedSubmissions) {
+    console.log(`✓ Round1 complete: ${submissionsInGame}/${lobby.expectedSubmissions} submissions (${lobby.round1.length} total entries)`);
+    lobby.phase = 'round2';
+    // Recalculate expected submissions for round2
+    const playersStillInGame = getPlayersInGame(lobby);
+    lobby.expectedSubmissions = playersStillInGame.length;
+    console.log(`Round2 starting with ${lobby.expectedSubmissions} expected submissions`);
+    
+    lobby.turn = 0;
+    for (let i = 0; i < lobby.players.length; i++) {
+      if (lobby.players[i]?.ws?.readyState === 1) {
+        lobby.turn = i;
+        break;
+      }
+    }
+    
+    broadcast(lobby, {
+      type: 'turnUpdate',
+      phase: 'round1',
+      round1: lobby.round1,
+      round2: lobby.round2,
+      currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
+      turnEndsAt: lobby.turnEndsAt
+    });
+    
+    startTurnTimer(lobby);
+    return;
+  }
+} else if (lobby.phase === 'round2') {
+  const submissionsInGame = lobby.round2.filter(entry =>
+    playersInGame.some(p => p.name === entry.name)
+  ).length;
+  
+  if (submissionsInGame >= lobby.expectedSubmissions) {
+    console.log(`✓ Round2 complete: ${submissionsInGame}/${lobby.expectedSubmissions} submissions (${lobby.round2.length} total entries)`);
+    lobby.phase = 'voting';
+
+          //lobby.phase = 'voting';
           broadcast(lobby, {
             type: 'turnUpdate',
             phase: 'round2',
