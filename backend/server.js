@@ -816,11 +816,14 @@ function processVotingResults(lobby, lobbyId) {
 
   
   const voteCounts = {};
-  playersInGame.filter(p => p.vote && p.vote.length > 0).forEach(p => {
-    p.vote.forEach(v => {
+playersInGame.filter(p => p.vote && p.vote.length > 0).forEach(p => {
+  p.vote.forEach(v => {
+    // Only count if the voted player is still in the game
+    if (playersInGame.some(p2 => p2.name === v)) {
       voteCounts[v] = (voteCounts[v] || 0) + 1;
-    });
+    }
   });
+});
   
   let ejectedPlayers = [];
   
@@ -1082,7 +1085,7 @@ if (lobby.phase === 'round1') {
     
     broadcast(lobby, {
       type: 'turnUpdate',
-      phase: 'round1',
+      phase: 'round2',
       round1: lobby.round1,
       round2: lobby.round2,
       currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
@@ -1486,7 +1489,10 @@ if (hasChanges && (lobby.phase === 'round1' || lobby.phase === 'round2')) {
   } else {
     // Check if round is now complete after removals
     const currentRound = lobby.phase === 'round1' ? lobby.round1 : lobby.round2;
-    if (currentRound.length >= lobby.expectedSubmissions) {
+    const submissionsInGame = currentRound.filter(entry =>
+  playersInGame.some(p => p.name === entry.name)
+).length;
+if (submissionsInGame >= lobby.expectedSubmissions) {
       console.log(`Cleanup: Round now complete after player removal`);
       skipCurrentPlayer(lobby, false);
     }
@@ -2278,7 +2284,7 @@ if (lobby.phase === 'round1') {
     
     broadcast(lobby, {
       type: 'turnUpdate',
-      phase: 'round1',
+      phase: 'round2',
       round1: lobby.round1,
       round2: lobby.round2,
       currentPlayer: lobby.players[lobby.turn]?.name || 'Unknown',
@@ -2356,9 +2362,10 @@ if (lobby.phase === 'round1') {
   }
   
   if (attempts >= lobby.players.length) {
-    console.log('ERROR: No valid player found for next turn');
-    return;
-  }
+  console.log('ERROR: No valid player found for next turn. Ending game.');
+  endGameEarly(lobby, 'no_valid_players');
+  return;
+}
   
   startTurnTimer(lobby);
       }
@@ -3125,14 +3132,21 @@ if (lobby.phase === 'results') {
             }));
           }
         } else if (lobby.phase === 'voting') {
-          const playersInGame = getPlayersInGame(lobby);
-          player.ws.send(JSON.stringify({
-            type: 'startVoting',
-            players: playersInGame.map(p => p.name),
-            twoImpostorsMode: lobby.twoImpostorsOption || false,
-            isSpectator: false
-          }));
-        }
+  const playersInGame = getPlayersInGame(lobby);
+  player.ws.send(JSON.stringify({
+    type: 'startVoting',
+    players: playersInGame.map(p => p.name),
+    twoImpostorsMode: lobby.twoImpostorsOption || false,
+    isSpectator: false
+  }));
+  // Send voting timer to reconnecting player
+  if (lobby.votingEndsAt) {
+    player.ws.send(JSON.stringify({
+      type: 'votingTimer',
+      votingEndsAt: lobby.votingEndsAt
+    }));
+  }
+}
       }
     } catch (err) {
       console.log(`Error sending game state to reconnecting player ${player.name}:`, err.message);
@@ -3214,14 +3228,21 @@ if (lobby.phase === 'results') {
             }));
           }
         } else if (lobby.phase === 'voting') {
-          const playersInGame = getPlayersInGame(lobby);
-          spectator.ws.send(JSON.stringify({
-            type: 'startVoting',
-            players: playersInGame.map(p => p.name),
-            twoImpostorsMode: lobby.twoImpostorsOption || false,
-            isSpectator: true
-          }));
-        }
+  const playersInGame = getPlayersInGame(lobby);
+  spectator.ws.send(JSON.stringify({
+    type: 'startVoting',
+    players: playersInGame.map(p => p.name),
+    twoImpostorsMode: lobby.twoImpostorsOption || false,
+    isSpectator: true
+  }));
+  // Send voting timer to reconnecting spectator
+  if (lobby.votingEndsAt) {
+    spectator.ws.send(JSON.stringify({
+      type: 'votingTimer',
+      votingEndsAt: lobby.votingEndsAt
+    }));
+  }
+}
       }
     } catch (err) {
       console.log(`Error sending game state to spectator ${spectator.name}:`, err.message);
