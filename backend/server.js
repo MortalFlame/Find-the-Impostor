@@ -48,7 +48,6 @@ const server = app.listen(PORT, HOST, () => {
   console.log('   • If still stuck on "Loading lobbies...", check browser console for errors');
   console.log('');
 });
-});
 
 const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
 
