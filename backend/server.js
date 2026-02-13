@@ -3,14 +3,94 @@ const cors = require('cors');
 const { WebSocketServer, WebSocket } = require('ws');
 const fs = require('fs');
 const crypto = require('crypto');
+const path = require('path');
+const os = require('os'); // 👈 ADDED
 
 const app = express();
 app.use(cors());
-const path = require('path');
+
+// Serve frontend files (backend/ and frontend/ are sibling folders)
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 10000;
-const server = app.listen(PORT, () => console.log('Server running'));
+const HOST = process.env.HOST || '0.0.0.0'; // 👈 ADDED – bind to all network interfaces
+
+const server = app.listen(PORT, HOST, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+
+  // 👇 ADDED – automatically show local IP addresses for easy sharing
+  const networkInterfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const name of Object.keys(networkInterfaces)) {
+    for (const net of networkInterfaces[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        addresses.push(net.address);
+      }
+    }
+  }
+
+  console.log('\n📱 Access the game from:');
+  console.log(`   Local:   http://localhost:${PORT}`);
+  if (addresses.length > 0) {
+    addresses.forEach(addr => {
+      console.log(`   Network: http://${addr}:${PORT} ← Use this on other devices!`);
+    });
+  } else {
+    console.log('   Network: No network interfaces found (check WiFi)');
+  }
+  console.log('');
+});
+
+const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
+
+let lobbies = {};
+const SERVER_ID = crypto.randomUUID();
+
+// Grace period constants
+const LOBBY_GRACE_PERIOD = 60000;
+const GAME_GRACE_PERIOD = 30000;
+const RESULTS_GRACE_PERIOD = 30000;
+
+// 👇 ADDED – optional debug mode control (set NODE_ENV=production on Render)
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const DEBUG_MODE = process.env.DEBUG_MODE === 'true' || !IS_PRODUCTION;
+if (DEBUG_MODE) console.log('🔧 Debug mode enabled');
+
+// Connection rate limiting
+const connectionRateLimit = new Map();
+
+// Health endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    uptime: process.uptime(),
+    lobbies: Object.keys(lobbies).length,
+    players: Object.values(lobbies).reduce((sum, lobby) => 
+      sum + lobby.players.filter(p => p.ws?.readyState === 1).length, 0
+    )
+  });
+});
+
+// Rate limiting middleware for WebSocket connections
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const limitInfo = connectionRateLimit.get(ip) || { count: 0, resetTime: now + 60000 };
+  
+  if (now > limitInfo.resetTime) {
+    limitInfo.count = 0;
+    limitInfo.resetTime = now + 60000;
+  }
+  
+  limitInfo.count++;
+  connectionRateLimit.set(ip, limitInfo);
+  
+  return limitInfo.count <= 100;
+}
+
+// ============================================
+// STOP – DO NOT DELETE OR CHANGE ANYTHING BELOW THIS LINE
+// Your existing wss definition and all functions remain untouched.
+// ============================================
 const wss = new WebSocketServer({ 
   server,
   perMessageDeflate: false,
