@@ -4,7 +4,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
-const os = require('os'); // 👈 ADDED
+const os = require('os');
 
 const app = express();
 app.use(cors());
@@ -13,12 +13,12 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 const PORT = process.env.PORT || 10000;
-const HOST = process.env.HOST || '0.0.0.0'; // 👈 ADDED – bind to all network interfaces
+const HOST = process.env.HOST || '0.0.0.0';
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`✅ Server running on port ${PORT}`);
 
-  // 👇 ADDED – automatically show local IP addresses for easy sharing
+  // Show local IP addresses for easy sharing
   const networkInterfaces = os.networkInterfaces();
   const addresses = [];
   for (const name of Object.keys(networkInterfaces)) {
@@ -51,7 +51,7 @@ const LOBBY_GRACE_PERIOD = 60000;
 const GAME_GRACE_PERIOD = 30000;
 const RESULTS_GRACE_PERIOD = 30000;
 
-// 👇 ADDED – optional debug mode control (set NODE_ENV=production on Render)
+// Optional debug mode control (set NODE_ENV=production on Render)
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const DEBUG_MODE = process.env.DEBUG_MODE === 'true' || !IS_PRODUCTION;
 if (DEBUG_MODE) console.log('🔧 Debug mode enabled');
@@ -88,8 +88,9 @@ function checkRateLimit(ip) {
 }
 
 // ============================================
-// STOP – DO NOT DELETE OR CHANGE ANYTHING BELOW THIS LINE
-// Your existing wss definition and all functions remain untouched.
+// STOP – YOUR EXISTING CODE CONTINUES BELOW
+// Do NOT change anything after this line.
+// The next line should be your existing `const wss = ...`
 // ============================================
 const wss = new WebSocketServer({ 
   server,
