@@ -98,47 +98,6 @@ const wss = new WebSocketServer({
   clientTracking: true
 });
 
-const words = JSON.parse(fs.readFileSync(__dirname + '/words.json', 'utf8'));
-
-let lobbies = {};
-const SERVER_ID = crypto.randomUUID();
-
-// Grace period constants
-const LOBBY_GRACE_PERIOD = 60000; // 60 seconds for lobby
-const GAME_GRACE_PERIOD = 30000;   // 30 seconds for in-game disconnections
-const RESULTS_GRACE_PERIOD = 30000; // 30 seconds for results phase
-
-// Connection rate limiting
-const connectionRateLimit = new Map(); // ip -> {count, resetTime}
-
-// Health endpoint for Render
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    uptime: process.uptime(),
-    lobbies: Object.keys(lobbies).length,
-    players: Object.values(lobbies).reduce((sum, lobby) => 
-      sum + lobby.players.filter(p => p.ws?.readyState === 1).length, 0
-    )
-  });
-});
-
-// Rate limiting middleware for WebSocket connections
-function checkRateLimit(ip) {
-  const now = Date.now();
-  const limitInfo = connectionRateLimit.get(ip) || { count: 0, resetTime: now + 60000 };
-  
-  if (now > limitInfo.resetTime) {
-    limitInfo.count = 0;
-    limitInfo.resetTime = now + 60000;
-  }
-  
-  limitInfo.count++;
-  connectionRateLimit.set(ip, limitInfo);
-  
-  return limitInfo.count <= 100; // Allow 100 connections per minute per IP
-}
-
 // Function to broadcast lobby list to all clients
 function broadcastLobbyList() {
   const lobbyList = Object.entries(lobbies).map(([id, lobby]) => ({
