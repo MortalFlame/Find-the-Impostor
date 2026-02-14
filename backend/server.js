@@ -2385,7 +2385,7 @@ if (lobby.phase === 'round1') {
           }, 500);
           return;
         }
-
+}
 
         let nextIndex = (lobby.turn + 1) % lobby.players.length;
         let attempts = 0;
